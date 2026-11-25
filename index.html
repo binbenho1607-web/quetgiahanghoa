@@ -1,0 +1,2906 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>ScanPrice - Quét QR & Tra Giá Hàng Hóa</title>
+
+  <!-- Font Inter hỗ trợ tiếng Việt sắc nét -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+            },
+            price: {
+              50: '#f0fdfa',
+              100: '#ccfbf1',
+              600: '#0d9488',
+              700: '#0f766e',
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Thư viện tạo mã QR thật (hỗ trợ Byte mode UTF-8 tiếng Việt) -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+  <!-- Thư viện giải mã QR từ luồng Camera & Ảnh (jsQR) -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+
+  <style>
+    /* Thiết lập cơ bản cho giao diện sáng mượt mà */
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background-color: #F8FAFC;
+      color: #0F172A;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Hiệu ứng đường tia laser quét mã QR */
+    @keyframes scanLaser {
+      0%, 100% {
+        top: 10%;
+        opacity: 0.4;
+      }
+      50% {
+        top: 86%;
+        opacity: 1;
+      }
+    }
+
+    .laser-line {
+      position: absolute;
+      left: 8%;
+      right: 8%;
+      height: 3px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, transparent, #0ea5e9, #14b8a6, #0ea5e9, transparent);
+      box-shadow: 0 0 12px rgba(20, 184, 166, 0.85), 0 0 4px rgba(14, 165, 233, 0.9);
+      animation: scanLaser 2.2s ease-in-out infinite;
+    }
+
+    /* Hiệu ứng nháy xanh lá khi quét thành công */
+    @keyframes scanFlash {
+      0% {
+        box-shadow: inset 0 0 0 0 rgba(16, 185, 129, 0.9);
+        background-color: rgba(16, 185, 129, 0.25);
+      }
+      100% {
+        box-shadow: inset 0 0 0 16px rgba(16, 185, 129, 0);
+        background-color: transparent;
+      }
+    }
+
+    .scan-success-flash {
+      animation: scanFlash 0.55s ease-out;
+    }
+
+    /* Hiệu ứng bật nhẹ khi cập nhật giá tiền mới */
+    @keyframes pricePop {
+      0% {
+        transform: scale(0.95);
+        opacity: 0.65;
+      }
+      50% {
+        transform: scale(1.03);
+      }
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
+    .animate-price-pop {
+      animation: pricePop 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* Thanh cuộn tinh gọn cho hàng demo & giỏ hàng */
+    .soft-scroll::-webkit-scrollbar {
+      height: 6px;
+      width: 6px;
+    }
+    .soft-scroll::-webkit-scrollbar-track {
+      background: #f1f5f9;
+      border-radius: 999px;
+    }
+    .soft-scroll::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 999px;
+    }
+
+    /* Bố cục chuyên biệt cho chế độ IN TEM A4 (@media print) */
+    #print-area {
+      display: none;
+    }
+
+    @media print {
+      @page {
+        size: A4 portrait;
+        margin: 10mm;
+      }
+
+      body {
+        background: #ffffff !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      /* Ẩn toàn bộ giao diện ứng dụng, chỉ hiển thị khu vực in tem */
+      #app-shell,
+      #toast-container,
+      .modal-overlay {
+        display: none !important;
+      }
+
+      #print-area {
+        display: block !important;
+        width: 100% !important;
+      }
+
+      .print-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid #e2e8f0;
+        padding-bottom: 6px;
+        margin-bottom: 10px;
+        font-size: 11px;
+        color: #64748b;
+      }
+
+      .print-grid {
+        display: grid;
+        gap: 8px;
+        width: 100%;
+      }
+
+      .print-grid.size-sm {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+      .print-grid.size-md {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .print-grid.size-lg {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .print-label-card {
+        border: 1.5px dashed #94a3b8;
+        border-radius: 8px;
+        padding: 10px 8px;
+        text-align: center;
+        background: #ffffff;
+        break-inside: avoid;
+        page-break-inside: avoid;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .print-label-card img {
+        display: block;
+        margin: 4px auto;
+        image-rendering: pixelated;
+      }
+
+      .print-grid.size-sm .print-label-card img { width: 92px; height: 92px; }
+      .print-grid.size-md .print-label-card img { width: 132px; height: 132px; }
+      .print-grid.size-lg .print-label-card img { width: 175px; height: 175px; }
+
+      .print-label-name {
+        font-weight: 700;
+        color: #0f172a;
+        line-height: 1.25;
+        margin-top: 4px;
+        word-break: break-word;
+      }
+
+      .print-grid.size-sm .print-label-name { font-size: 11px; }
+      .print-grid.size-md .print-label-name { font-size: 13px; }
+      .print-grid.size-lg .print-label-name { font-size: 15px; }
+
+      .print-label-meta {
+        font-size: 10px;
+        color: #64748b;
+        margin-top: 2px;
+      }
+
+      .print-label-price {
+        font-weight: 800;
+        color: #0f766e;
+        margin-top: 4px;
+      }
+
+      .print-grid.size-sm .print-label-price { font-size: 13px; }
+      .print-grid.size-md .print-label-price { font-size: 16px; }
+      .print-grid.size-lg .print-label-price { font-size: 20px; }
+    }
+
+    /* Bố cục xem trước trang in A4 trực tiếp trên màn hình (Tab In tem QR) */
+    .a4-preview-sheet {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.12);
+    }
+
+    .a4-preview-grid {
+      display: grid;
+      gap: 10px;
+      width: 100%;
+    }
+    .a4-preview-grid.size-sm { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .a4-preview-grid.size-md { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .a4-preview-grid.size-lg { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+
+    @media (min-width: 640px) {
+      .a4-preview-grid.size-sm { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .a4-preview-grid.size-md { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .a4-preview-grid.size-lg { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    .a4-preview-card {
+      border: 1.5px dashed #cbd5e1;
+      border-radius: 10px;
+      padding: 10px 8px;
+      text-align: center;
+      background: #ffffff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .a4-preview-card img {
+      display: block;
+      margin: 4px auto;
+      image-rendering: pixelated;
+    }
+
+    .a4-preview-grid.size-sm .a4-preview-card img { width: 84px; height: 84px; }
+    .a4-preview-grid.size-md .a4-preview-card img { width: 112px; height: 112px; }
+    .a4-preview-grid.size-lg .a4-preview-card img { width: 148px; height: 148px; }
+  </style>
+</head>
+<body class="min-h-screen bg-[#F8FAFC] text-slate-900 antialiased selection:bg-sky-100 selection:text-sky-900">
+
+  <!-- ==================== GIAO DIỆN CHÍNH CỦA ỨNG DỤNG ==================== -->
+  <div id="app-shell" class="flex flex-col min-h-screen">
+
+    <!-- Thanh điều hướng trên cùng (Sticky Header) -->
+    <header class="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex flex-wrap items-center justify-between gap-3 py-3">
+
+          <!-- Logo & Tên Ứng Dụng -->
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-600 to-teal-500 flex items-center justify-center text-white shadow-sm shrink-0">
+              <!-- Icon QR Scanner SVG -->
+              <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 7V5a2 2 0 012-2h2m10 0h2a2 2 0 012 2v2m0 10v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2M7 12h10" />
+              </svg>
+            </div>
+            <div class="min-w-0">
+              <h1 class="text-base sm:text-lg font-extrabold tracking-tight text-slate-900 truncate leading-tight">
+                ScanPrice
+              </h1>
+              <p class="text-xs text-slate-500 truncate">Quét QR &amp; Tra Giá Hàng Hóa</p>
+            </div>
+          </div>
+
+          <!-- Nút chuyển Tab trên màn hình lớn + Nút Âm thanh -->
+          <div class="flex items-center gap-2 sm:gap-3">
+            <!-- Tabs Desktop/Tablet (3 Tab chính) -->
+            <nav class="hidden md:flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/70" aria-label="Điều hướng chính">
+              <button
+                type="button"
+                data-tab="scanner"
+                onclick="switchTab('scanner')"
+                class="tab-btn-desktop flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Quét mã &amp; Tính tiền
+              </button>
+              <button
+                type="button"
+                data-tab="manager"
+                onclick="switchTab('manager')"
+                class="tab-btn-desktop flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                </svg>
+                Kho hàng &amp; Tạo QR
+              </button>
+              <button
+                type="button"
+                data-tab="print"
+                onclick="switchTab('print')"
+                class="tab-btn-desktop flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                In tem QR (A4)
+              </button>
+            </nav>
+
+            <!-- Nút Bật/Tắt âm thanh Bíp -->
+            <button
+              id="btn-sound-toggle"
+              type="button"
+              onclick="toggleSound()"
+              title="Bật hoặc tắt âm thanh bíp khi quét"
+              class="flex items-center gap-1.5 px-3 py-2.5 rounded-xl border text-sm font-semibold transition-all active:scale-95 cursor-pointer">
+              <span id="sound-icon"></span>
+              <span id="sound-label" class="hidden sm:inline">Tiếng bíp: Bật</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Tabs dành riêng cho Mobile (3 Tab gọn gàng, dễ chạm) -->
+        <div class="grid grid-cols-3 gap-1.5 pb-3 md:hidden">
+          <button
+            type="button"
+            data-tab="scanner"
+            onclick="switchTab('scanner')"
+            class="tab-btn-mobile flex flex-col sm:flex-row items-center justify-center gap-1 py-2 px-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer">
+            <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            <span class="truncate">Quét &amp; Tính</span>
+          </button>
+          <button
+            type="button"
+            data-tab="manager"
+            onclick="switchTab('manager')"
+            class="tab-btn-mobile flex flex-col sm:flex-row items-center justify-center gap-1 py-2 px-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer">
+            <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+            </svg>
+            <span class="truncate">Kho &amp; QR</span>
+          </button>
+          <button
+            type="button"
+            data-tab="print"
+            onclick="switchTab('print')"
+            class="tab-btn-mobile flex flex-col sm:flex-row items-center justify-center gap-1 py-2 px-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer">
+            <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            <span class="truncate">In tem A4</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Nội dung chính -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-7">
+
+      <!-- =================================================================== -->
+      <!-- TAB 1: QUÉT MÃ QR & TÍNH TIỀN                                       -->
+      <!-- =================================================================== -->
+      <section id="tab-scanner" class="space-y-5">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+
+          <!-- CỘT TRÁI: CAMERA QUÉT MÃ QR & QUÉT THỬ NHANH -->
+          <div class="lg:col-span-5 space-y-4">
+            <div class="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+              <!-- Đầu khung Camera -->
+              <div class="px-4 sm:px-5 py-3.5 border-b border-slate-100 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2.5">
+                  <span id="cam-status-dot" class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
+                  <h2 class="text-sm sm:text-base font-extrabold text-slate-900">Camera Quét Mã QR</h2>
+                </div>
+                <span id="cam-facing-badge" class="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600">
+                  Camera Sau
+                </span>
+              </div>
+
+              <!-- Khung hiển thị Camera -->
+              <div class="p-4 sm:p-5 space-y-3.5">
+                <div id="camera-viewport" class="relative w-full aspect-[4/3] rounded-2xl overflow-hidden bg-slate-900 border border-slate-200">
+                  <!-- Luồng Video từ Camera -->
+                  <video id="qr-video" class="hidden w-full h-full object-cover" autoplay muted playsinline></video>
+                  <!-- Canvas ẩn dùng cho jsQR đọc khung hình -->
+                  <canvas id="qr-hidden-canvas" class="hidden"></canvas>
+
+                  <!-- Lớp phủ khung ngắm + Tia laser khi Camera đang chạy -->
+                  <div id="scanner-overlay" class="hidden absolute inset-0 pointer-events-none flex items-center justify-center p-6">
+                    <div class="relative w-52 h-52 sm:w-60 sm:h-60 max-w-full max-h-full">
+                      <!-- 4 góc khung ngắm -->
+                      <span class="absolute top-0 left-0 w-7 h-7 border-t-4 border-l-4 border-sky-400 rounded-tl-xl"></span>
+                      <span class="absolute top-0 right-0 w-7 h-7 border-t-4 border-r-4 border-sky-400 rounded-tr-xl"></span>
+                      <span class="absolute bottom-0 left-0 w-7 h-7 border-b-4 border-l-4 border-teal-400 rounded-bl-xl"></span>
+                      <span class="absolute bottom-0 right-0 w-7 h-7 border-b-4 border-r-4 border-teal-400 rounded-br-xl"></span>
+                      <!-- Tia laser chạy dọc -->
+                      <div class="laser-line"></div>
+                    </div>
+                  </div>
+
+                  <!-- Hiệu ứng nháy xanh lá khi quét thành công -->
+                  <div id="scan-flash-overlay" class="absolute inset-0 pointer-events-none bg-emerald-500/20 border-4 border-emerald-400 rounded-2xl opacity-0 transition-opacity duration-300 flex items-center justify-center">
+                    <div class="px-4 py-2 rounded-full bg-emerald-600 text-white text-sm font-bold shadow-lg flex items-center gap-1.5">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span>Đã quét mã QR!</span>
+                    </div>
+                  </div>
+
+                  <!-- Trạng thái chờ khi chưa bật Camera -->
+                  <div id="camera-placeholder" class="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-gradient-to-b from-slate-50 to-slate-100">
+                    <div class="w-16 h-16 rounded-2xl bg-sky-50 border border-sky-200/80 text-sky-600 flex items-center justify-center mb-3 shadow-2xs">
+                      <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    </div>
+                    <p class="text-sm font-bold text-slate-800">Camera đang tắt</p>
+                    <p class="text-xs text-slate-500 mt-1 max-w-xs">
+                      Nhấn <strong>Bật Camera Quét QR</strong> để hướng vào tem sản phẩm trên máy tính, điện thoại hoặc iPad.
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Hộp báo lỗi Camera (nếu không cấp quyền / thiếu thiết bị) -->
+                <div id="camera-error-box" class="hidden p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 leading-relaxed"></div>
+
+                <!-- Hàng nút điều khiển Camera & Tải ảnh QR -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <button
+                    id="btn-toggle-camera"
+                    type="button"
+                    onclick="toggleCamera()"
+                    class="sm:col-span-2 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold text-sm shadow-sm transition-all active:scale-[0.98] cursor-pointer">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    <span>Bật Camera Quét QR</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onclick="switchCameraFacing()"
+                    class="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 font-semibold text-xs sm:text-sm transition-all active:scale-[0.98] cursor-pointer">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Đổi Camera</span>
+                  </button>
+
+                  <label class="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200/80 text-sky-700 font-semibold text-xs sm:text-sm transition-all active:scale-[0.98] cursor-pointer">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <span>Quét từ ảnh QR</span>
+                    <input type="file" accept="image/*" onchange="handleImageUpload(event)" class="hidden" />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Thanh Quét Thử Nhanh (Demo) -->
+            <div class="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-4 sm:p-5">
+              <div class="flex items-center justify-between gap-2 mb-3">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500">Quét thử nhanh (Demo)</h3>
+                <span class="text-[11px] text-slate-400">Chạm để mô phỏng quét</span>
+              </div>
+              <div id="demo-buttons-container" class="flex flex-wrap gap-2">
+                <!-- Render bằng JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- CỘT PHẢI: CHUYỂN CHẾ ĐỘ, MÀN HÌNH HIỂN THỊ GIÁ & GIỎ HÀNG / LỊCH SỬ -->
+          <div class="lg:col-span-7 space-y-4">
+            <!-- Thanh chuyển chế độ: Chỉ tra giá / Tính tiền (Giỏ hàng) -->
+            <div class="bg-white rounded-2xl border border-slate-200/90 p-1.5 shadow-sm grid grid-cols-2 gap-1.5">
+              <button
+                id="mode-btn-check"
+                type="button"
+                onclick="setScanMode('check')"
+                class="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-bold bg-sky-600 text-white shadow-xs transition-all cursor-pointer">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                </svg>
+                <span>Chỉ tra giá</span>
+              </button>
+              <button
+                id="mode-btn-pos"
+                type="button"
+                onclick="setScanMode('pos')"
+                class="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-all cursor-pointer">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+                <span>Tính tiền (Giỏ hàng)</span>
+                <span id="cart-count-badge" class="hidden min-w-[20px] h-5 px-1.5 rounded-full bg-rose-500 text-white text-[11px] font-extrabold inline-flex items-center justify-center">0</span>
+              </button>
+            </div>
+
+            <!-- Thẻ hiển thị kết quả quét & Giá tiền nổi bật -->
+            <div id="price-display-card" class="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+              <!-- Render bằng JS -->
+            </div>
+
+            <!-- Bảng Lịch sử quét gần đây (hiện ở chế độ Chỉ tra giá) -->
+            <div id="recent-scans-panel" class="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+              <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between gap-2">
+                <h3 class="text-sm font-extrabold text-slate-800">Lịch sử quét gần đây</h3>
+                <button
+                  type="button"
+                  onclick="clearScanHistory()"
+                  class="text-xs font-semibold text-slate-400 hover:text-rose-600 transition-colors cursor-pointer">
+                  Xóa lịch sử
+                </button>
+              </div>
+              <div id="recent-scans-list" class="divide-y divide-slate-100">
+                <!-- Render bằng JS -->
+              </div>
+            </div>
+
+            <!-- Bảng Giỏ hàng tính tiền POS (hiện ở chế độ Tính tiền) -->
+            <div id="pos-cart-panel" class="hidden bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+              <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <h3 class="text-sm font-extrabold text-slate-800">Giỏ hàng tính tiền</h3>
+                  <span id="cart-items-summary" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-teal-50 text-teal-700">0 sản phẩm</span>
+                </div>
+                <button
+                  type="button"
+                  onclick="confirmClearCart()"
+                  class="text-xs font-semibold text-slate-400 hover:text-rose-600 transition-colors cursor-pointer">
+                  Xóa giỏ
+                </button>
+              </div>
+
+              <div id="cart-list" class="divide-y divide-slate-100 max-h-[340px] overflow-y-auto soft-scroll">
+                <!-- Render bằng JS -->
+              </div>
+
+              <div class="p-4 sm:p-5 bg-slate-50/80 border-t border-slate-200/80 space-y-3.5">
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-bold text-slate-600">Tổng cộng</span>
+                  <span id="cart-total-amount" class="text-2xl sm:text-3xl font-extrabold text-teal-600 tabular-nums">0 ₫</span>
+                </div>
+                <button
+                  id="btn-checkout"
+                  type="button"
+                  disabled
+                  onclick="openCheckoutModal()"
+                  class="w-full py-3.5 px-5 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white text-sm sm:text-base font-bold shadow-sm transition-all active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
+                  Thanh toán đơn hàng
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- =================================================================== -->
+      <!-- TAB 2: KHO HÀNG & TẠO MÃ QR THẬT                                    -->
+      <!-- =================================================================== -->
+      <section id="tab-manager" class="hidden space-y-5">
+
+        <!-- Thanh công cụ trên cùng: Tìm kiếm, Lọc danh mục & Thêm sản phẩm -->
+        <div class="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-4 sm:p-5">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h2 class="text-lg font-extrabold text-slate-900">Kho Hàng &amp; Tạo Mã QR</h2>
+              <p class="text-xs sm:text-sm text-slate-500 mt-0.5">
+                Mỗi mã QR lưu trực tiếp JSON UTF-8 <span class="font-mono text-xs text-slate-600">{id, name, price, unit}</span> giúp quét chính xác xuyên thiết bị.
+              </p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onclick="confirmResetSampleData()"
+                class="px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-sm font-semibold transition-all cursor-pointer">
+                Khôi phục mặc định
+              </button>
+              <button
+                type="button"
+                onclick="switchTab('print')"
+                class="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-800 text-sm font-bold transition-all cursor-pointer">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                <span>In tem A4</span>
+              </button>
+              <button
+                type="button"
+                onclick="openProductModal()"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold shadow-sm transition-all active:scale-[0.98] cursor-pointer">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                <span>Thêm sản phẩm mới</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Bộ lọc tìm kiếm + Danh mục + Đếm tổng sản phẩm -->
+          <div class="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+            <!-- Ô tìm kiếm -->
+            <div class="md:col-span-6 relative">
+              <svg class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                id="product-search-input"
+                type="text"
+                placeholder="Tìm theo tên, mã SP hoặc danh mục..."
+                oninput="renderProductGrid()"
+                class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500 transition-all" />
+            </div>
+
+            <!-- Lọc theo danh mục -->
+            <div class="md:col-span-4">
+              <select
+                id="category-filter-select"
+                onchange="handleCategoryFilterChange()"
+                class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-medium text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500 cursor-pointer">
+                <option value="ALL">Tất cả danh mục</option>
+              </select>
+            </div>
+
+            <!-- Số lượng sản phẩm trong kho -->
+            <div class="md:col-span-2 flex md:justify-end">
+              <span id="inventory-count-badge" class="inline-flex items-center px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 text-xs font-bold">
+                5 sản phẩm
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Lưới danh sách thẻ sản phẩm kèm mã QR thật -->
+        <div id="product-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+          <!-- Render bằng JS -->
+        </div>
+      </section>
+
+      <!-- =================================================================== -->
+      <!-- TAB 3: IN TEM QR (KHỔ GIẤY A4) & XEM TRƯỚC TRỰC TIẾP                -->
+      <!-- =================================================================== -->
+      <section id="tab-print" class="hidden space-y-5">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+
+          <!-- CỘT TRÁI: CHỌN SẢN PHẨM, SỐ LƯỢNG TEM & CẤU HÌNH IN -->
+          <div class="lg:col-span-5 space-y-4">
+            <div class="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
+                <div>
+                  <h2 class="text-base font-extrabold text-slate-900">Chọn sản phẩm &amp; Số lượng tem</h2>
+                  <p class="text-xs text-slate-500 mt-0.5">Tùy chỉnh số lượng bản in cho từng mặt hàng</p>
+                </div>
+                <span id="selected-print-count" class="px-2.5 py-1 rounded-full bg-teal-50 border border-teal-200 text-teal-700 text-xs font-extrabold shrink-0">
+                  5 tem
+                </span>
+              </div>
+
+              <!-- Thanh chọn nhanh -->
+              <div class="px-5 py-2.5 bg-slate-50/80 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div class="flex items-center gap-3">
+                  <button type="button" onclick="selectAllPrintProducts(true)" class="font-semibold text-sky-600 hover:text-sky-700 cursor-pointer">Chọn tất cả</button>
+                  <span class="text-slate-300">|</span>
+                  <button type="button" onclick="selectAllPrintProducts(false)" class="font-semibold text-slate-500 hover:text-slate-700 cursor-pointer">Bỏ chọn</button>
+                </div>
+                <button type="button" onclick="resetAllPrintQuantities()" class="font-semibold text-teal-700 hover:text-teal-800 cursor-pointer">
+                  Đặt SL = 1
+                </button>
+              </div>
+
+              <!-- Danh sách chọn sản phẩm + stepper số lượng tem -->
+              <div id="print-product-selector" class="divide-y divide-slate-100 max-h-[380px] overflow-y-auto soft-scroll">
+                <!-- Render bằng JS -->
+              </div>
+
+              <!-- Tùy chọn khổ tem, ẩn/hiện giá và Nút In ngay -->
+              <div class="p-4 sm:p-5 bg-slate-50/70 border-t border-slate-200/80 space-y-4">
+                <!-- Chọn kích cỡ tem -->
+                <div>
+                  <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Kích thước tem trên khổ A4</label>
+                  <div class="grid grid-cols-3 gap-1.5 bg-slate-200/70 p-1 rounded-xl">
+                    <button type="button" data-size="sm" onclick="setPrintSize('sm')" class="print-size-btn py-2 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer">Nhỏ (4 cột)</button>
+                    <button type="button" data-size="md" onclick="setPrintSize('md')" class="print-size-btn py-2 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer">Vừa (3 cột)</button>
+                    <button type="button" data-size="lg" onclick="setPrintSize('lg')" class="print-size-btn py-2 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer">Lớn (2 cột)</button>
+                  </div>
+                </div>
+
+                <!-- Bật/Tắt hiển thị giá trên tem -->
+                <label class="flex items-center justify-between gap-3 p-3 rounded-xl bg-white border border-slate-200 cursor-pointer select-none hover:bg-slate-50 transition-colors">
+                  <div>
+                    <span class="block text-sm font-bold text-slate-800">Hiển thị giá tiền trên tem</span>
+                    <span id="label-price-hint" class="block text-xs text-slate-500 mt-0.5">
+                      Tem in &amp; ảnh PNG sẽ hiển thị giá kèm đơn vị tính.
+                    </span>
+                  </div>
+                  <input
+                    id="toggle-label-price"
+                    type="checkbox"
+                    checked
+                    onchange="handleLabelPriceToggle()"
+                    class="w-5 h-5 rounded text-teal-600 focus:ring-teal-500 accent-teal-600 cursor-pointer shrink-0" />
+                </label>
+
+                <!-- Nút In Tem Ngay -->
+                <button
+                  id="btn-print-now"
+                  type="button"
+                  onclick="printSelectedLabels()"
+                  class="w-full flex items-center justify-center gap-2 py-3.5 px-5 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white text-sm sm:text-base font-bold shadow-sm transition-all active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
+                  <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                  </svg>
+                  <span>In ngay (Khổ giấy A4)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- CỘT PHẢI: XEM TRƯỚC BỐ CỤC LƯỚI TEM KHỔ A4 -->
+          <div class="lg:col-span-7">
+            <div class="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+              <div class="px-5 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 bg-slate-50/70">
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-teal-500"></span>
+                  <h3 class="text-sm font-bold text-slate-800">Xem trước trang in A4</h3>
+                </div>
+                <span id="print-preview-meta" class="text-xs font-medium text-slate-500">
+                  Khổ A4 dọc • 3 tem/hàng
+                </span>
+              </div>
+
+              <div class="p-4 sm:p-6 bg-slate-100/70">
+                <div id="print-live-preview" class="a4-preview-sheet rounded-xl p-4 sm:p-5 min-h-[380px]">
+                  <!-- Render lưới tem xem trước bằng JS -->
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+    </main>
+
+    <!-- Chân trang nhẹ nhàng -->
+    <footer class="border-t border-slate-200/70 bg-white/70 py-4 mt-auto">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-400">
+        <p>ScanPrice — Mô phỏng quét mã QR &amp; tra giá hàng hóa nhanh chóng</p>
+        <p>Hỗ trợ Camera máy tính, điện thoại &amp; iPad • Lưu trữ cục bộ an toàn</p>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ==================== KHU VỰC IN TEM A4 (CHỈ HIỆN KHI IN) ==================== -->
+  <div id="print-area"></div>
+
+  <!-- ==================== THÔNG BÁO TOAST (KHÔNG DÙNG ALERT) ==================== -->
+  <div id="toast-container" class="fixed bottom-4 right-4 left-4 sm:left-auto sm:w-88 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- ==================== MODAL THÊM / SỬA SẢN PHẨM ==================== -->
+  <div id="product-modal" class="modal-overlay hidden fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-lg overflow-hidden animate-price-pop">
+      <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+        <h3 id="product-modal-title" class="text-base font-extrabold text-slate-900">Thêm sản phẩm mới</h3>
+        <button type="button" onclick="closeProductModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <form id="product-form" onsubmit="saveProductForm(event)" class="p-5 space-y-4">
+        <input type="hidden" id="form-editing-id" />
+
+        <!-- Chọn Biểu tượng Emoji -->
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Biểu tượng sản phẩm</label>
+          <div class="flex items-center gap-3">
+            <div id="selected-emoji-preview" class="w-12 h-12 rounded-xl bg-sky-50 border border-sky-200 flex items-center justify-center text-2xl shrink-0">📦</div>
+            <div id="emoji-picker-grid" class="flex flex-wrap gap-1.5">
+              <!-- Render danh sách emoji chọn nhanh bằng JS -->
+            </div>
+          </div>
+          <input type="hidden" id="form-emoji" value="📦" />
+        </div>
+
+        <!-- Tên sản phẩm -->
+        <div>
+          <label for="form-name" class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Tên hàng hóa *</label>
+          <input
+            id="form-name"
+            type="text"
+            required
+            maxlength="60"
+            placeholder="VD: Sữa tươi tiệt trùng Vinamilk 180ml"
+            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500" />
+        </div>
+
+        <!-- Giá tiền & Đơn vị tính -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <div>
+            <label for="form-price" class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Giá bán (VNĐ) *</label>
+            <input
+              id="form-price"
+              type="number"
+              required
+              min="0"
+              step="100"
+              placeholder="VD: 9000"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500" />
+          </div>
+          <div>
+            <label for="form-unit" class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Đơn vị tính *</label>
+            <input
+              id="form-unit"
+              type="text"
+              required
+              maxlength="16"
+              list="unit-suggestions"
+              placeholder="hộp, gói, quyển, chai..."
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500" />
+            <datalist id="unit-suggestions">
+              <option value="hộp"></option>
+              <option value="chai"></option>
+              <option value="gói"></option>
+              <option value="quyển"></option>
+              <option value="lon"></option>
+              <option value="túi"></option>
+              <option value="cái"></option>
+              <option value="kg"></option>
+              <option value="lốc"></option>
+              <option value="thùng"></option>
+            </datalist>
+          </div>
+        </div>
+
+        <!-- Danh mục & Mã sản phẩm -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <div>
+            <label for="form-category" class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Danh mục *</label>
+            <input
+              id="form-category"
+              type="text"
+              required
+              maxlength="30"
+              list="category-suggestions"
+              placeholder="VD: Đồ uống, Thực phẩm..."
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500" />
+            <datalist id="category-suggestions">
+              <option value="Đồ uống"></option>
+              <option value="Thực phẩm"></option>
+              <option value="Văn phòng phẩm"></option>
+              <option value="Bánh kẹo"></option>
+              <option value="Gia dụng"></option>
+              <option value="Khác"></option>
+            </datalist>
+          </div>
+          <div>
+            <label for="form-code" class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Mã sản phẩm (ID)</label>
+            <div class="flex gap-1.5">
+              <input
+                id="form-code"
+                type="text"
+                maxlength="16"
+                placeholder="VD: SP06"
+                class="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white text-sm font-mono uppercase text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500" />
+              <button
+                type="button"
+                onclick="fillAutoProductCode()"
+                title="Tạo mã tự động"
+                class="px-2.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold shrink-0 cursor-pointer">
+                Tự động
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Nút lưu & hủy -->
+        <div class="pt-2 flex items-center justify-end gap-2.5">
+          <button type="button" onclick="closeProductModal()" class="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-semibold cursor-pointer">
+            Hủy
+          </button>
+          <button type="submit" class="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold shadow-sm cursor-pointer">
+            Lưu sản phẩm
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL PHÓNG TO MÃ QR (TIỆN QUÉT TRỰC TIẾP) ==================== -->
+  <div id="qr-preview-modal" class="modal-overlay hidden fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4" onclick="if(event.target===this) closeQrPreviewModal()">
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-sm p-6 text-center animate-price-pop">
+      <div class="flex items-center justify-between mb-3">
+        <span id="preview-code-badge" class="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600">SP01</span>
+        <button type="button" onclick="closeQrPreviewModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 inline-block shadow-xs">
+        <canvas id="preview-qr-canvas" class="mx-auto"></canvas>
+      </div>
+      <h4 id="preview-product-name" class="text-lg font-extrabold text-slate-900 mt-4"></h4>
+      <p id="preview-product-price" class="text-2xl font-extrabold text-teal-600 tabular-nums mt-1"></p>
+      <p class="text-xs text-slate-400 mt-2">Bạn có thể dùng điện thoại/iPad hướng vào mã này để quét thử ngay!</p>
+      <div class="mt-5 grid grid-cols-2 gap-2.5">
+        <button id="preview-download-btn" type="button" class="py-2.5 px-3 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 font-semibold text-sm border border-sky-200 cursor-pointer">
+          Tải ảnh PNG
+        </button>
+        <button type="button" onclick="closeQrPreviewModal()" class="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm cursor-pointer">
+          Đóng
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL HÓA ĐƠN THANH TOÁN ==================== -->
+  <div id="checkout-modal" class="modal-overlay hidden fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4" onclick="if(event.target===this) closeCheckoutModal()">
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md overflow-hidden animate-price-pop">
+      <div class="p-6 text-center border-b border-slate-100 bg-gradient-to-b from-teal-50/70 to-white">
+        <div class="w-14 h-14 rounded-2xl bg-teal-600 text-white flex items-center justify-center mx-auto mb-3 shadow-sm">
+          <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <h3 class="text-xl font-extrabold text-slate-900">Xác nhận thanh toán</h3>
+        <p id="checkout-time" class="text-xs text-slate-500 mt-1"></p>
+      </div>
+      <div id="checkout-items-list" class="p-5 max-h-60 overflow-y-auto divide-y divide-slate-100 text-sm soft-scroll"></div>
+      <div class="px-5 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+        <span class="font-bold text-slate-700">Tổng thanh toán</span>
+        <span id="checkout-total-price" class="text-2xl font-extrabold text-teal-600 tabular-nums"></span>
+      </div>
+      <div class="p-4 grid grid-cols-2 gap-2.5">
+        <button type="button" onclick="closeCheckoutModal()" class="py-2.5 px-4 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-semibold text-sm cursor-pointer">
+          Quay lại
+        </button>
+        <button type="button" onclick="completeCheckout()" class="py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm shadow-sm cursor-pointer">
+          Hoàn tất &amp; Đơn mới
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL XÁC NHẬN CHUNG (THAY THẾ CONFIRM) ==================== -->
+  <div id="confirm-modal" class="modal-overlay hidden fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-sm p-5 animate-price-pop">
+      <h3 id="confirm-modal-title" class="text-base font-extrabold text-slate-900">Xác nhận thao tác</h3>
+      <p id="confirm-modal-message" class="text-sm text-slate-600 mt-2 leading-relaxed"></p>
+      <div class="mt-5 flex items-center justify-end gap-2.5">
+        <button type="button" onclick="closeConfirmModal()" class="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-semibold cursor-pointer">
+          Hủy
+        </button>
+        <button id="confirm-modal-ok" type="button" class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold shadow-sm cursor-pointer">
+          Đồng ý
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MÃ NGUỒN JAVASCRIPT ỨNG DỤNG ==================== -->
+  <script>
+    /*************************************************************************
+     * 1. CẤU HÌNH & DỮ LIỆU MẪU BAN ĐẦU (PHIÊN BẢN V2 - 5 SẢN PHẨM)
+     *************************************************************************/
+    const STORAGE_KEY = 'scanprice_products_v2';
+    const SETTINGS_KEY = 'scanprice_settings_v1';
+
+    // Danh sách 5 sản phẩm mặc định mới (đã xóa SP06)
+    const DEFAULT_PRODUCTS = [
+      { id: 'SP01', name: 'Sữa tươi tiệt trùng Vinamilk 180ml', price: 9000, unit: 'hộp', category: 'Đồ uống', emoji: '🥛' },
+      { id: 'SP02', name: 'Nước tinh khiết Aquafina 500ml', price: 6000, unit: 'chai', category: 'Đồ uống', emoji: '💧' },
+      { id: 'SP03', name: 'Mì Hảo Hảo Tôm Chua Cay 75g', price: 4500, unit: 'gói', category: 'Thực phẩm', emoji: '🍜' },
+      { id: 'SP04', name: 'Tập 96 trang', price: 10000, unit: 'quyển', category: 'Văn phòng phẩm', emoji: '📓' },
+      { id: 'SP05', name: 'Bánh snack Oishi 34g', price: 6000, unit: 'gói', category: 'Bánh kẹo', emoji: '🍿' },
+    ];
+
+    // Bộ emoji chọn nhanh khi thêm/sửa sản phẩm
+    const EMOJI_CHOICES = [
+      '📦', '🥛', '💧', '🍜', '📓', '🍿', '🍞', '☕',
+      '🥤', '🍪', '🍎', '🍫', '🧃', '✏️', '🧴', '🧻',
+      '🍗', '🍬', '🧼', '🛒'
+    ];
+
+    // Trạng thái toàn cục của ứng dụng
+    const state = {
+      activeTab: 'scanner',      // 'scanner' | 'manager' | 'print'
+      scanMode: 'check',         // 'check' (Chỉ tra giá) | 'pos' (Tính tiền giỏ hàng)
+      soundEnabled: true,
+      showPriceOnLabel: true,
+      printSize: 'md',           // 'sm' | 'md' | 'lg'
+      categoryFilter: 'ALL',
+      products: [],
+      selectedIds: new Set(),
+      printQuantities: {},       // Số lượng tem muốn in cho từng mã SP: { SP01: 1, ... }
+      lastScannedResult: null,   // Kết quả quét gần nhất
+      scanHistory: [],           // Lịch sử tối đa 6 lần quét
+      cart: [],                  // Danh sách món trong giỏ hàng [{ id, name, price, unit, category, emoji, qty }]
+      // Trạng thái Camera
+      cameraActive: false,
+      facingMode: 'environment', // 'environment' (sau) | 'user' (trước)
+      mediaStream: null,
+      rafId: null,
+      lastFrameScanAt: 0,
+      // Cơ chế chống quét lặp (cooldown 2 giây cho cùng 1 sản phẩm)
+      cooldownKey: '',
+      cooldownUntil: 0,
+      // Callback cho hộp thoại xác nhận
+      confirmCallback: null,
+    };
+
+    // Cấu hình bộ mã hóa UTF-8 cho thư viện qrcode-generator để hỗ trợ tiếng Việt có dấu
+    if (typeof qrcode !== 'undefined') {
+      qrcode.stringToBytes = function (str) {
+        return Array.from(new TextEncoder().encode(str));
+      };
+    }
+
+    /*************************************************************************
+     * 2. LƯU TRỮ LOCALSTORAGE & TIỆN ÍCH ĐỊNH DẠNG
+     *************************************************************************/
+    function syncPrintQuantities() {
+      const next = {};
+      state.products.forEach(p => {
+        const currentQty = Number(state.printQuantities[p.id]);
+        next[p.id] = currentQty >= 1 ? Math.min(50, currentQty) : 1;
+      });
+      state.printQuantities = next;
+    }
+
+    function loadStateFromStorage() {
+      try {
+        const rawProducts = localStorage.getItem(STORAGE_KEY);
+        if (rawProducts) {
+          const parsed = JSON.parse(rawProducts);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            state.products = parsed.map(p => ({
+              id: String(p.id || '').toUpperCase(),
+              name: String(p.name || ''),
+              price: Number(p.price) || 0,
+              unit: String(p.unit || 'cái'),
+              category: String(p.category || 'Khác'),
+              emoji: String(p.emoji || '📦'),
+            }));
+          } else {
+            state.products = structuredClone(DEFAULT_PRODUCTS);
+          }
+        } else {
+          state.products = structuredClone(DEFAULT_PRODUCTS);
+          saveProductsToStorage();
+        }
+      } catch (err) {
+        console.error('Lỗi đọc danh sách sản phẩm:', err);
+        state.products = structuredClone(DEFAULT_PRODUCTS);
+      }
+
+      // Mặc định chọn tất cả sản phẩm với số lượng 1 tem/món
+      state.selectedIds = new Set(state.products.map(p => p.id));
+      syncPrintQuantities();
+
+      try {
+        const rawSettings = localStorage.getItem(SETTINGS_KEY);
+        if (rawSettings) {
+          const s = JSON.parse(rawSettings);
+          if (typeof s.soundEnabled === 'boolean') state.soundEnabled = s.soundEnabled;
+          if (typeof s.showPriceOnLabel === 'boolean') state.showPriceOnLabel = s.showPriceOnLabel;
+          if (['sm', 'md', 'lg'].includes(s.printSize)) state.printSize = s.printSize;
+        }
+      } catch (err) {
+        console.error('Lỗi đọc cài đặt:', err);
+      }
+    }
+
+    function saveProductsToStorage() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state.products));
+      } catch (err) {
+        console.error('Không thể lưu sản phẩm vào localStorage:', err);
+      }
+    }
+
+    function saveSettingsToStorage() {
+      try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+          soundEnabled: state.soundEnabled,
+          showPriceOnLabel: state.showPriceOnLabel,
+          printSize: state.printSize,
+        }));
+      } catch (err) {
+        console.error('Không thể lưu cài đặt:', err);
+      }
+    }
+
+    // Định dạng tiền VNĐ chuẩn Việt Nam (VD: 9.000 ₫)
+    function formatVND(amount) {
+      const num = Number(amount) || 0;
+      return num.toLocaleString('vi-VN') + ' ₫';
+    }
+
+    // Định dạng giá kèm đơn vị tính rõ ràng (VD: 9.000 ₫ / hộp)
+    function formatPriceWithUnit(amount, unit) {
+      const cleanUnit = String(unit || '').trim();
+      return cleanUnit ? `${formatVND(amount)} / ${cleanUnit}` : formatVND(amount);
+    }
+
+    // Chống XSS khi chèn chuỗi người dùng vào HTML
+    function escapeHTML(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    // Định dạng giờ:phút:giây hiện tại
+    function getCurrentTimeLabel() {
+      return new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    /*************************************************************************
+     * 3. ÂM THANH "BÍP" MÁY QUÉT SIÊU THỊ (WEB AUDIO API)
+     *************************************************************************/
+    let audioCtx = null;
+
+    function getAudioContext() {
+      if (!audioCtx) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+          audioCtx = new AudioContextClass();
+        }
+      }
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+      return audioCtx;
+    }
+
+    // Tạo tiếng "bíp" thanh thoát đặc trưng của máy quét siêu thị
+    function playScannerBeep(type = 'success') {
+      if (!state.soundEnabled) return;
+      try {
+        const ctx = getAudioContext();
+        if (!ctx) return;
+
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        if (type === 'success') {
+          // Tiếng bíp siêu thị chuẩn ~1950Hz, ngắn gọn sắc nét
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(1950, now);
+          gain.gain.setValueAtTime(0.001, now);
+          gain.gain.exponentialRampToValueAtTime(0.22, now + 0.012);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.14);
+        } else if (type === 'checkout') {
+          // Hai nốt vui tai khi hoàn tất thanh toán
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(1046.5, now);
+          osc.frequency.setValueAtTime(1318.5, now + 0.09);
+          gain.gain.setValueAtTime(0.001, now);
+          gain.gain.exponentialRampToValueAtTime(0.2, now + 0.015);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.26);
+        } else {
+          // Tiếng báo nhẹ khi không nhận diện được mã
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(320, now);
+          gain.gain.setValueAtTime(0.001, now);
+          gain.gain.exponentialRampToValueAtTime(0.12, now + 0.015);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.2);
+        }
+      } catch (err) {
+        console.warn('Không phát được âm thanh Web Audio:', err);
+      }
+    }
+
+    function toggleSound() {
+      state.soundEnabled = !state.soundEnabled;
+      saveSettingsToStorage();
+      updateSoundButtonUI();
+      if (state.soundEnabled) {
+        playScannerBeep('success');
+        showToast('Đã bật âm thanh bíp khi quét', 'info');
+      } else {
+        showToast('Đã tắt âm thanh bíp', 'info');
+      }
+    }
+
+    function updateSoundButtonUI() {
+      const btn = document.getElementById('btn-sound-toggle');
+      const iconEl = document.getElementById('sound-icon');
+      const labelEl = document.getElementById('sound-label');
+
+      if (state.soundEnabled) {
+        btn.className = 'flex items-center gap-1.5 px-3 py-2.5 rounded-xl border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 text-sm font-semibold transition-all active:scale-95 cursor-pointer';
+        iconEl.innerHTML = `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>`;
+        labelEl.textContent = 'Tiếng bíp: Bật';
+      } else {
+        btn.className = 'flex items-center gap-1.5 px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-100 text-slate-500 hover:bg-slate-200/70 text-sm font-semibold transition-all active:scale-95 cursor-pointer';
+        iconEl.innerHTML = `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>`;
+        labelEl.textContent = 'Tiếng bíp: Tắt';
+      }
+    }
+
+    /*************************************************************************
+     * 4. MÃ HÓA & VẼ MÃ QR THẬT (XUYÊN THIẾT BỊ + TIẾNG VIỆT UTF-8)
+     *************************************************************************/
+    // Tạo chuỗi JSON chuẩn UTF-8 {id, name, price, unit} để lưu vào mã QR thật
+    function buildProductQrPayload(product) {
+      return JSON.stringify({
+        id: product.id,
+        name: product.name,
+        price: Number(product.price) || 0,
+        unit: product.unit || 'cái',
+      });
+    }
+
+    // Vẽ mã QR sắc nét lên một phần tử <canvas>
+    function drawQrToCanvas(canvas, text, size = 180, quietZoneModules = 3) {
+      if (typeof qrcode === 'undefined') return;
+      try {
+        const qr = qrcode(0, 'M'); // Tự động chọn phiên bản QR phù hợp, sửa lỗi mức M (15%)
+        qr.addData(text, 'Byte');
+        qr.make();
+
+        const moduleCount = qr.getModuleCount();
+        const totalModules = moduleCount + quietZoneModules * 2;
+        const cellSize = Math.floor(size / totalModules) || 2;
+        const actualSize = cellSize * totalModules;
+
+        canvas.width = actualSize;
+        canvas.height = actualSize;
+        canvas.style.width = size + 'px';
+        canvas.style.height = size + 'px';
+
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, actualSize, actualSize);
+
+        ctx.fillStyle = '#0F172A';
+        for (let r = 0; r < moduleCount; r++) {
+          for (let c = 0; c < moduleCount; c++) {
+            if (qr.isDark(r, c)) {
+              ctx.fillRect(
+                (c + quietZoneModules) * cellSize,
+                (r + quietZoneModules) * cellSize,
+                cellSize,
+                cellSize
+              );
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Lỗi tạo mã QR:', err);
+      }
+    }
+
+    // Tạo ảnh DataURL độ phân giải cao dùng cho in A4
+    function generateHighResQrDataUrl(product, pixelSize = 360) {
+      const offscreen = document.createElement('canvas');
+      drawQrToCanvas(offscreen, buildProductQrPayload(product), pixelSize, 2);
+      return offscreen.toDataURL('image/png');
+    }
+
+    // Hàm hỗ trợ xuống dòng văn bản trên Canvas khi xuất ảnh PNG tem nhãn
+    function wrapCanvasText(ctx, text, maxWidth, maxLines = 2) {
+      const words = text.split(/\s+/);
+      const lines = [];
+      let currentLine = '';
+
+      for (let i = 0; i < words.length; i++) {
+        const testLine = currentLine ? currentLine + ' ' + words[i] : words[i];
+        if (ctx.measureText(testLine).width <= maxWidth) {
+          currentLine = testLine;
+        } else {
+          if (currentLine) lines.push(currentLine);
+          currentLine = words[i];
+          if (lines.length === maxLines - 1) {
+            // Dòng cuối: nối phần còn lại và cắt dấu ... nếu quá dài
+            const rest = words.slice(i).join(' ');
+            let trimmed = rest;
+            while (ctx.measureText(trimmed + '...').width > maxWidth && trimmed.length > 1) {
+              trimmed = trimmed.slice(0, -1);
+            }
+            lines.push(rest === trimmed ? trimmed : trimmed + '...');
+            return lines;
+          }
+        }
+      }
+      if (currentLine) lines.push(currentLine);
+      return lines;
+    }
+
+    // Xuất & Tải ảnh PNG tem dán sản phẩm hoàn chỉnh (QR + Tên + Mã SP + Giá tùy chọn)
+    function downloadProductLabelPNG(productId) {
+      const product = state.products.find(p => p.id === productId);
+      if (!product) return;
+
+      const width = 600;
+      const height = 740;
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+
+      // Nền trắng tinh
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, width, height);
+
+      // Viền nét đứt nhẹ dễ cắt dán
+      ctx.strokeStyle = '#94A3B8';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([12, 8]);
+      ctx.strokeRect(18, 18, width - 36, height - 36);
+      ctx.setLineDash([]);
+
+      // Thanh nhãn nhỏ trên cùng
+      ctx.fillStyle = '#0284C7';
+      ctx.font = '700 22px Inter, system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('SCANPRICE', 46, 68);
+
+      ctx.fillStyle = '#64748B';
+      ctx.font = '700 22px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('MÃ: ' + product.id, width - 46, 68);
+
+      // Đường kẻ mảnh ngăn cách
+      ctx.strokeStyle = '#E2E8F0';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(46, 88);
+      ctx.lineTo(width - 46, 88);
+      ctx.stroke();
+
+      // Vẽ mã QR thật sắc nét ở chính giữa
+      const qrCanvas = document.createElement('canvas');
+      drawQrToCanvas(qrCanvas, buildProductQrPayload(product), 400, 2);
+      const qrDrawSize = 390;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(qrCanvas, (width - qrDrawSize) / 2, 110, qrDrawSize, qrDrawSize);
+      ctx.imageSmoothingEnabled = true;
+
+      // Vẽ Tên sản phẩm (tối đa 2 dòng)
+      ctx.fillStyle = '#0F172A';
+      ctx.font = '800 32px Inter, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      const titleLines = wrapCanvasText(ctx, product.name, width - 92, 2);
+      let textY = 550;
+      titleLines.forEach((line, idx) => {
+        ctx.fillText(line, width / 2, textY + idx * 40);
+      });
+      const afterNameY = textY + (titleLines.length - 1) * 40;
+
+      // Vẽ Giá tiền kèm đơn vị hoặc Dòng hướng dẫn quét (theo tùy chọn Hiện/Ẩn giá)
+      if (state.showPriceOnLabel) {
+        ctx.fillStyle = '#0D9488';
+        ctx.font = '800 38px Inter, system-ui, sans-serif';
+        ctx.fillText(formatPriceWithUnit(product.price, product.unit), width / 2, afterNameY + 66);
+
+        ctx.fillStyle = '#64748B';
+        ctx.font = '600 22px Inter, system-ui, sans-serif';
+        ctx.fillText('Danh mục: ' + (product.category || 'Hàng hóa'), width / 2, afterNameY + 106);
+      } else {
+        ctx.fillStyle = '#0284C7';
+        ctx.font = '700 28px Inter, system-ui, sans-serif';
+        ctx.fillText('Quét mã QR để tra giá', width / 2, afterNameY + 64);
+
+        ctx.fillStyle = '#64748B';
+        ctx.font = '600 22px Inter, system-ui, sans-serif';
+        ctx.fillText('Đơn vị: ' + product.unit, width / 2, afterNameY + 104);
+      }
+
+      // Kích hoạt tải file PNG
+      const link = document.createElement('a');
+      link.download = `Tem-QR-${product.id}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+
+      showToast(`Đã tải tem PNG cho ${product.name}`, 'success');
+    }
+
+    /*************************************************************************
+     * 5. ĐIỀU HƯỚNG 3 TAB CHÍNH & CHUYỂN CHẾ ĐỘ TRA GIÁ / TÍNH TIỀN
+     *************************************************************************/
+    function switchTab(tabName) {
+      state.activeTab = tabName;
+
+      // Tự động dừng camera khi rời tab Quét để tiết kiệm pin và giải phóng camera
+      if (tabName !== 'scanner' && state.cameraActive) {
+        stopCamera();
+      }
+
+      document.getElementById('tab-scanner').classList.toggle('hidden', tabName !== 'scanner');
+      document.getElementById('tab-manager').classList.toggle('hidden', tabName !== 'manager');
+      document.getElementById('tab-print').classList.toggle('hidden', tabName !== 'print');
+
+      // Cập nhật trạng thái nút Tab Desktop
+      document.querySelectorAll('.tab-btn-desktop').forEach(btn => {
+        const isActive = btn.dataset.tab === tabName;
+        btn.className = isActive
+          ? 'tab-btn-desktop flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-bold bg-white text-sky-700 shadow-xs transition-all cursor-pointer'
+          : 'tab-btn-desktop flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold text-slate-600 hover:text-slate-900 transition-all cursor-pointer';
+      });
+
+      // Cập nhật trạng thái nút Tab Mobile
+      document.querySelectorAll('.tab-btn-mobile').forEach(btn => {
+        const isActive = btn.dataset.tab === tabName;
+        btn.className = isActive
+          ? 'tab-btn-mobile flex flex-col sm:flex-row items-center justify-center gap-1 py-2 px-2 rounded-xl text-xs font-bold border border-sky-200 bg-sky-50 text-sky-700 shadow-2xs transition-all cursor-pointer'
+          : 'tab-btn-mobile flex flex-col sm:flex-row items-center justify-center gap-1 py-2 px-2 rounded-xl text-xs font-semibold border border-slate-200 bg-white text-slate-600 transition-all cursor-pointer';
+      });
+
+      if (tabName === 'manager') {
+        populateCategoryFilterOptions();
+        renderProductGrid();
+      } else if (tabName === 'print') {
+        renderPrintTab();
+      } else {
+        renderDemoButtons();
+      }
+    }
+
+    function setScanMode(mode) {
+      state.scanMode = mode;
+      const btnCheck = document.getElementById('mode-btn-check');
+      const btnPos = document.getElementById('mode-btn-pos');
+      const cartPanel = document.getElementById('pos-cart-panel');
+      const historyPanel = document.getElementById('recent-scans-panel');
+
+      if (mode === 'check') {
+        btnCheck.className = 'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-bold bg-sky-600 text-white shadow-xs transition-all cursor-pointer';
+        btnPos.className = 'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-all cursor-pointer';
+        cartPanel.classList.add('hidden');
+        historyPanel.classList.remove('hidden');
+      } else {
+        btnCheck.className = 'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-all cursor-pointer';
+        btnPos.className = 'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-sm font-bold bg-teal-600 text-white shadow-xs transition-all cursor-pointer';
+        cartPanel.classList.remove('hidden');
+        historyPanel.classList.add('hidden');
+        renderCart();
+      }
+
+      renderPriceDisplay();
+    }
+
+    /*************************************************************************
+     * 6. ĐIỀU KHIỂN CAMERA & GIẢI MÃ QR (jsQR + UTF-8 TextDecoder)
+     *************************************************************************/
+    async function toggleCamera() {
+      // Khởi tạo AudioContext ngay trong thao tác chạm của người dùng
+      getAudioContext();
+      if (state.cameraActive) {
+        stopCamera();
+      } else {
+        await startCamera();
+      }
+    }
+
+    async function startCamera() {
+      const errorBox = document.getElementById('camera-error-box');
+      errorBox.classList.add('hidden');
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showCameraError('Trình duyệt hiện tại không hỗ trợ truy cập Camera (hoặc trang chưa chạy qua HTTPS). Bạn vẫn có thể dùng nút <strong>Quét từ ảnh QR</strong> hoặc <strong>Quét thử nhanh</strong> bên dưới.');
+        return;
+      }
+
+      try {
+        // Thử ưu tiên camera đã chọn (sau/trước), nếu máy tính không có camera sau sẽ tự fallback
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { ideal: state.facingMode },
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            },
+            audio: false
+          });
+        } catch (firstErr) {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        }
+
+        state.mediaStream = stream;
+        state.cameraActive = true;
+
+        const video = document.getElementById('qr-video');
+        video.srcObject = stream;
+        video.setAttribute('playsinline', 'true'); // Quan trọng cho iOS Safari / iPadOS
+        await video.play();
+
+        video.classList.remove('hidden');
+        document.getElementById('scanner-overlay').classList.remove('hidden');
+        document.getElementById('camera-placeholder').classList.add('hidden');
+        updateCameraButtonsUI();
+
+        // Bắt đầu vòng lặp đọc khung hình tìm mã QR
+        state.lastFrameScanAt = 0;
+        state.rafId = requestAnimationFrame(scanVideoFrameLoop);
+      } catch (err) {
+        console.error('Lỗi bật camera:', err);
+        let msg = 'Không thể bật camera. Vui lòng cấp quyền truy cập Camera cho trình duyệt rồi thử lại.';
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          msg = 'Bạn đã từ chối quyền Camera. Hãy vào cài đặt trình duyệt cho phép Camera, hoặc dùng nút <strong>Quét từ ảnh QR</strong>.';
+        } else if (err.name === 'NotFoundError') {
+          msg = 'Không tìm thấy thiết bị Camera trên máy này. Bạn hãy thử tính năng <strong>Quét từ ảnh QR</strong> hoặc <strong>Quét thử nhanh</strong> nhé!';
+        }
+        showCameraError(msg);
+        stopCamera();
+      }
+    }
+
+    function stopCamera() {
+      state.cameraActive = false;
+      if (state.rafId) {
+        cancelAnimationFrame(state.rafId);
+        state.rafId = null;
+      }
+      if (state.mediaStream) {
+        state.mediaStream.getTracks().forEach(track => track.stop());
+        state.mediaStream = null;
+      }
+
+      const video = document.getElementById('qr-video');
+      video.pause();
+      video.srcObject = null;
+      video.classList.add('hidden');
+
+      document.getElementById('scanner-overlay').classList.add('hidden');
+      document.getElementById('camera-placeholder').classList.remove('hidden');
+      updateCameraButtonsUI();
+    }
+
+    async function switchCameraFacing() {
+      state.facingMode = state.facingMode === 'environment' ? 'user' : 'environment';
+      document.getElementById('cam-facing-badge').textContent =
+        state.facingMode === 'environment' ? 'Camera Sau' : 'Camera Trước';
+
+      if (state.cameraActive) {
+        stopCamera();
+        await startCamera();
+      } else {
+        showToast(`Đã chọn ${state.facingMode === 'environment' ? 'Camera Sau' : 'Camera Trước'}`, 'info');
+      }
+    }
+
+    function showCameraError(htmlMsg) {
+      const box = document.getElementById('camera-error-box');
+      box.innerHTML = htmlMsg;
+      box.classList.remove('hidden');
+    }
+
+    function updateCameraButtonsUI() {
+      const btn = document.getElementById('btn-toggle-camera');
+      const dot = document.getElementById('cam-status-dot');
+
+      if (state.cameraActive) {
+        dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse';
+        btn.className = 'sm:col-span-2 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-sm shadow-sm transition-all active:scale-[0.98] cursor-pointer';
+        btn.innerHTML = `
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+          </svg>
+          <span>Dừng Camera</span>
+        `;
+      } else {
+        dot.className = 'w-2.5 h-2.5 rounded-full bg-slate-300';
+        btn.className = 'sm:col-span-2 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold text-sm shadow-sm transition-all active:scale-[0.98] cursor-pointer';
+        btn.innerHTML = `
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+          <span>Bật Camera Quét QR</span>
+        `;
+      }
+    }
+
+    // Giải mã chuỗi UTF-8 chính xác từ binaryData của jsQR
+    function decodeJsQrResult(code) {
+      if (!code) return '';
+      if (code.binaryData && code.binaryData.length > 0) {
+        try {
+          return new TextDecoder('utf-8').decode(new Uint8Array(code.binaryData));
+        } catch (err) {
+          return code.data || '';
+        }
+      }
+      return code.data || '';
+    }
+
+    // Vòng lặp quét khung hình camera mỗi ~130ms để mượt mà và tiết kiệm pin
+    function scanVideoFrameLoop(timestamp) {
+      if (!state.cameraActive) return;
+
+      const video = document.getElementById('qr-video');
+      const canvas = document.getElementById('qr-hidden-canvas');
+
+      if (video.readyState === video.HAVE_ENOUGH_DATA && timestamp - state.lastFrameScanAt >= 130) {
+        state.lastFrameScanAt = timestamp;
+
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        if (vw > 0 && vh > 0) {
+          // Thu nhỏ khung hình xử lý tối đa 640px để jsQR quét siêu nhanh trên điện thoại/iPad
+          const scale = Math.min(1, 640 / Math.max(vw, vh));
+          const sw = Math.floor(vw * scale);
+          const sh = Math.floor(vh * scale);
+
+          canvas.width = sw;
+          canvas.height = sh;
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(video, 0, 0, sw, sh);
+
+          try {
+            const imageData = ctx.getImageData(0, 0, sw, sh);
+            const code = jsQR(imageData.data, sw, sh, { inversionAttempts: 'dontInvert' });
+            if (code) {
+              const decodedText = decodeJsQrResult(code).trim();
+              if (decodedText) {
+                handleDecodedQrText(decodedText, false);
+              }
+            }
+          } catch (err) {
+            // Bỏ qua lỗi khung hình tạm thời
+          }
+        }
+      }
+
+      state.rafId = requestAnimationFrame(scanVideoFrameLoop);
+    }
+
+    // Quét mã QR từ file ảnh người dùng tải lên
+    function handleImageUpload(event) {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = ''; // Cho phép chọn lại cùng 1 ảnh
+      if (!file) return;
+
+      getAudioContext();
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const img = new Image();
+        img.onload = function () {
+          const canvas = document.getElementById('qr-hidden-canvas');
+          const maxDim = 1200;
+          const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          const w = Math.floor(img.width * scale);
+          const h = Math.floor(img.height * scale);
+
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+
+          const imageData = ctx.getImageData(0, 0, w, h);
+          const code = jsQR(imageData.data, w, h, { inversionAttempts: 'attemptBoth' });
+
+          if (code) {
+            const decodedText = decodeJsQrResult(code).trim();
+            handleDecodedQrText(decodedText, true); // Bỏ qua cooldown khi tải ảnh chủ động
+          } else {
+            playScannerBeep('error');
+            showToast('Không tìm thấy mã QR rõ nét trong ảnh này. Vui lòng thử ảnh khác!', 'error');
+          }
+        };
+        img.onerror = function () {
+          showToast('Không thể đọc tệp hình ảnh đã chọn.', 'error');
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    /*************************************************************************
+     * 7. XỬ LÝ KẾT QUẢ QUÉT QR THÔNG MINH & COOLDOWN 2 GIÂY
+     *************************************************************************/
+    function triggerScanSuccessEffect() {
+      const viewport = document.getElementById('camera-viewport');
+      const flashOverlay = document.getElementById('scan-flash-overlay');
+
+      viewport.classList.remove('scan-success-flash');
+      void viewport.offsetWidth; // Force reflow để chạy lại animation
+      viewport.classList.add('scan-success-flash');
+
+      flashOverlay.classList.remove('opacity-0');
+      setTimeout(() => {
+        flashOverlay.classList.add('opacity-0');
+      }, 650);
+    }
+
+    function handleDecodedQrText(rawText, bypassCooldown = false) {
+      const now = Date.now();
+
+      // Phân tích dữ liệu QR: ưu tiên JSON ScanPrice -> khớp ID trong kho -> mã QR ngoài
+      let parsedProduct = null;
+      let source = 'unknown';
+
+      try {
+        const obj = JSON.parse(rawText);
+        const hasNewSchema = obj && typeof obj === 'object' && (obj.id || obj.name) && obj.price !== undefined;
+        const hasLegacySchema = obj && typeof obj === 'object' && (obj.id || obj.n) && obj.p !== undefined;
+
+        if (hasNewSchema || hasLegacySchema) {
+          const qrId = String(obj.id || '').trim().toUpperCase();
+          // Nếu ID đã tồn tại trong danh sách localStorage của máy hiện tại, ưu tiên lấy thông tin & giá mới nhất
+          const localMatch = qrId ? state.products.find(p => p.id.toUpperCase() === qrId) : null;
+          if (localMatch) {
+            parsedProduct = { ...localMatch };
+            source = 'local';
+          } else {
+            parsedProduct = {
+              id: qrId || 'QR-EXT',
+              name: String((hasNewSchema ? obj.name : obj.n) || 'Sản phẩm không tên'),
+              price: Number(hasNewSchema ? obj.price : obj.p) || 0,
+              unit: String((hasNewSchema ? obj.unit : obj.u) || 'cái'),
+              category: String(obj.category || 'Hàng hóa QR'),
+              emoji: obj.e ? String(obj.e) : '🏷️',
+            };
+            source = 'qr';
+          }
+        }
+      } catch (_) {
+        // Không phải JSON, thử tìm theo mã sản phẩm trực tiếp trong kho máy
+        const plainMatch = state.products.find(p => p.id.toUpperCase() === rawText.toUpperCase());
+        if (plainMatch) {
+          parsedProduct = { ...plainMatch };
+          source = 'local';
+        }
+      }
+
+      const dedupeKey = parsedProduct ? `P:${parsedProduct.id}` : `RAW:${rawText}`;
+
+      // Cơ chế chống quét lặp 2 giây cho cùng 1 sản phẩm khi dùng camera
+      if (!bypassCooldown && state.cooldownKey === dedupeKey && now < state.cooldownUntil) {
+        return;
+      }
+      state.cooldownKey = dedupeKey;
+      state.cooldownUntil = now + 2000;
+
+      // Hiệu ứng âm thanh & nháy xanh
+      playScannerBeep('success');
+      if (state.cameraActive) {
+        triggerScanSuccessEffect();
+      }
+
+      if (parsedProduct) {
+        const scanRecord = {
+          type: 'product',
+          product: parsedProduct,
+          source, // 'local' hoặc 'qr'
+          time: getCurrentTimeLabel(),
+        };
+        state.lastScannedResult = scanRecord;
+
+        // Thêm vào lịch sử quét gần đây (giữ tối đa 6 mục)
+        state.scanHistory.unshift(scanRecord);
+        if (state.scanHistory.length > 6) state.scanHistory.pop();
+
+        // Nếu đang ở chế độ Tính tiền (Giỏ hàng), tự động cộng vào hóa đơn
+        if (state.scanMode === 'pos') {
+          addProductToCart(parsedProduct, false);
+        }
+
+        renderPriceDisplay(true);
+        renderRecentScans();
+      } else {
+        // Mã QR ngoài định dạng hàng hóa
+        state.lastScannedResult = {
+          type: 'external',
+          rawText,
+          time: getCurrentTimeLabel(),
+        };
+        renderPriceDisplay(true);
+        showToast('Đã đọc mã QR ngoài hệ thống ScanPrice', 'info');
+      }
+    }
+
+    // Quét thử nhanh từ thanh Demo
+    function simulateQuickScan(productId) {
+      getAudioContext();
+      const product = state.products.find(p => p.id === productId);
+      if (!product) return;
+      const payload = buildProductQrPayload(product);
+      handleDecodedQrText(payload, true);
+    }
+
+    // Lưu sản phẩm vừa quét từ thiết bị khác vào kho máy hiện tại
+    function saveScannedQrProductToLocal() {
+      const res = state.lastScannedResult;
+      if (!res || res.type !== 'product') return;
+      const p = res.product;
+
+      const exists = state.products.some(item => item.id.toUpperCase() === p.id.toUpperCase());
+      if (exists) {
+        showToast(`Mã ${p.id} đã có trong kho máy này.`, 'info');
+        return;
+      }
+
+      state.products.unshift({ ...p });
+      state.selectedIds.add(p.id);
+      syncPrintQuantities();
+      saveProductsToStorage();
+      res.source = 'local';
+      renderPriceDisplay();
+      renderDemoButtons();
+      showToast(`Đã lưu "${p.name}" vào kho sản phẩm của máy!`, 'success');
+    }
+
+    /*************************************************************************
+     * 8. RENDER GIAO DIỆN GIÁ TIỀN (KÈM ĐƠN VỊ), LỊCH SỬ & GIỎ HÀNG
+     *************************************************************************/
+    function renderPriceDisplay(animate = false) {
+      const container = document.getElementById('price-display-card');
+      const res = state.lastScannedResult;
+      const popClass = animate ? 'animate-price-pop' : '';
+
+      // Trạng thái chưa quét món nào
+      if (!res) {
+        container.innerHTML = `
+          <div class="p-8 sm:p-10 text-center flex flex-col items-center justify-center min-h-[260px]">
+            <div class="w-16 h-16 rounded-2xl bg-slate-100 border border-slate-200/80 flex items-center justify-center text-3xl mb-4">
+              🏷️
+            </div>
+            <h3 class="text-lg font-extrabold text-slate-800">Chưa có sản phẩm nào được quét</h3>
+            <p class="text-sm text-slate-500 mt-1.5 max-w-md">
+              Hãy bật Camera để quét mã QR dán trên sản phẩm, tải ảnh QR, hoặc chọn một nút <strong>Quét thử nhanh (SP01–SP05)</strong> ở bên trái để xem giá tiền ngay lập tức.
+            </p>
+          </div>
+        `;
+        return;
+      }
+
+      // Nếu quét phải mã QR ngoài (URL hoặc văn bản bất kỳ)
+      if (res.type === 'external') {
+        container.innerHTML = `
+          <div class="p-6 sm:p-7 ${popClass}">
+            <div class="flex items-center justify-between gap-2 mb-3">
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-xs font-bold">
+                Mã QR ngoài định dạng giá
+              </span>
+              <span class="text-xs text-slate-400">${escapeHTML(res.time)}</span>
+            </div>
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Nội dung đọc được:</p>
+            <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-mono text-slate-800 break-all">
+              ${escapeHTML(res.rawText)}
+            </div>
+            <div class="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onclick="createProductFromExternalQr()"
+                class="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold shadow-xs cursor-pointer">
+                + Tạo sản phẩm mới từ mã này
+              </button>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      // Hiển thị sản phẩm đã quét với GIÁ TIỀN + ĐƠN VỊ TÍNH CỠ LỚN
+      const p = res.product;
+      const isCompact = state.scanMode === 'pos';
+      const sourceBadge = res.source === 'local'
+        ? `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-sky-50 border border-sky-200/80 text-sky-700 text-xs font-semibold">
+            <span class="w-1.5 h-1.5 rounded-full bg-sky-500"></span>Giá mới nhất từ kho máy
+          </span>`
+        : `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-teal-50 border border-teal-200/80 text-teal-700 text-xs font-semibold">
+            <span class="w-1.5 h-1.5 rounded-full bg-teal-500"></span>Đọc trực tiếp từ mã QR
+          </span>`;
+
+      const categoryBadge = p.category
+        ? `<span class="text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">${escapeHTML(p.category)}</span>`
+        : '';
+
+      if (isCompact) {
+        // Bố cục gọn nổi bật khi đang ở chế độ Tính tiền (Giỏ hàng)
+        container.innerHTML = `
+          <div class="p-4 sm:p-5 ${popClass}">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs font-bold uppercase tracking-wider text-teal-600">Vừa quét vào giỏ</span>
+                ${sourceBadge}
+              </div>
+              <span class="text-xs text-slate-400">${escapeHTML(res.time)}</span>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div class="flex items-center gap-3.5 min-w-0">
+                <div class="w-14 h-14 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-center text-3xl shrink-0">
+                  ${escapeHTML(p.emoji || '📦')}
+                </div>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">${escapeHTML(p.id)}</span>
+                    ${categoryBadge}
+                  </div>
+                  <h3 class="text-lg sm:text-xl font-extrabold text-slate-900 mt-1 truncate">${escapeHTML(p.name)}</h3>
+                </div>
+              </div>
+              <div class="sm:text-right shrink-0">
+                <div class="text-2xl sm:text-3xl font-extrabold text-teal-600 tabular-nums tracking-tight leading-none">
+                  ${formatVND(p.price)} <span class="text-base sm:text-lg font-bold text-teal-700/80">/ ${escapeHTML(p.unit)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      } else {
+        // Bố cục PHÓNG TO TẬP TRUNG GIÁ TIỀN + ĐƠN VỊ ở chế độ Chỉ tra giá
+        container.innerHTML = `
+          <div class="p-5 sm:p-7 ${popClass}">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-5">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 border border-slate-200/70">
+                  MÃ: ${escapeHTML(p.id)}
+                </span>
+                ${categoryBadge}
+                ${sourceBadge}
+              </div>
+              <span class="text-xs font-medium text-slate-400">Quét lúc ${escapeHTML(res.time)}</span>
+            </div>
+
+            <div class="flex flex-col items-center text-center py-2">
+              <div class="w-20 h-20 rounded-3xl bg-gradient-to-br from-sky-50 to-teal-50 border border-teal-100 flex items-center justify-center text-5xl shadow-2xs mb-4">
+                ${escapeHTML(p.emoji || '📦')}
+              </div>
+
+              <h3 class="text-xl sm:text-2xl font-extrabold text-slate-900 leading-snug max-w-lg">
+                ${escapeHTML(p.name)}
+              </h3>
+
+              <!-- KHUNG GIÁ TIỀN KÈM ĐƠN VỊ CỠ RẤT LỚN -->
+              <div class="mt-5 w-full rounded-2xl bg-gradient-to-br from-teal-50/90 via-sky-50/60 to-white border border-teal-200/70 py-5 px-4 shadow-inner">
+                <p class="text-xs font-bold uppercase tracking-widest text-teal-700/80 mb-1">Giá niêm yết</p>
+                <div class="flex items-baseline justify-center flex-wrap gap-x-2 gap-y-1">
+                  <span class="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-teal-600 tabular-nums tracking-tight leading-tight">
+                    ${formatVND(p.price)}
+                  </span>
+                  <span class="text-xl sm:text-2xl font-bold text-teal-700/80">
+                    / ${escapeHTML(p.unit)}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Các nút thao tác nhanh -->
+              <div class="mt-5 flex flex-wrap items-center justify-center gap-2.5 w-full">
+                <button
+                  type="button"
+                  onclick="addLastScannedToCartAndSwitch()"
+                  class="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold shadow-xs transition-all active:scale-[0.98] cursor-pointer">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span>Thêm vào giỏ tính tiền</span>
+                </button>
+                ${res.source === 'qr' ? `
+                  <button
+                    type="button"
+                    onclick="saveScannedQrProductToLocal()"
+                    class="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-sm font-semibold transition-all cursor-pointer">
+                    Lưu vào kho máy này
+                  </button>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    function createProductFromExternalQr() {
+      const res = state.lastScannedResult;
+      if (!res || res.type !== 'external') return;
+      switchTab('manager');
+      openProductModal();
+      // Gợi ý điền nội dung mã QR vào tên
+      const text = res.rawText.slice(0, 40);
+      document.getElementById('form-name').value = text;
+    }
+
+    function renderRecentScans() {
+      const listEl = document.getElementById('recent-scans-list');
+      if (state.scanHistory.length === 0) {
+        listEl.innerHTML = `<div class="p-5 text-center text-xs text-slate-400">Chưa có lịch sử quét nào trong phiên này.</div>`;
+        return;
+      }
+
+      listEl.innerHTML = state.scanHistory.map((item, idx) => `
+        <button
+          type="button"
+          onclick="selectFromHistory(${idx})"
+          class="w-full px-5 py-3 flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors text-left cursor-pointer">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="text-xl shrink-0">${escapeHTML(item.product.emoji || '📦')}</span>
+            <div class="min-w-0">
+              <p class="text-sm font-bold text-slate-800 truncate">${escapeHTML(item.product.name)}</p>
+              <p class="text-xs text-slate-400">${escapeHTML(item.product.id)} • ${escapeHTML(item.time)}</p>
+            </div>
+          </div>
+          <span class="text-sm font-extrabold text-teal-600 tabular-nums shrink-0">${formatPriceWithUnit(item.product.price, item.product.unit)}</span>
+        </button>
+      `).join('');
+    }
+
+    function selectFromHistory(idx) {
+      const item = state.scanHistory[idx];
+      if (!item) return;
+      state.lastScannedResult = item;
+      renderPriceDisplay(true);
+    }
+
+    function clearScanHistory() {
+      state.scanHistory = [];
+      renderRecentScans();
+    }
+
+    function renderDemoButtons() {
+      const container = document.getElementById('demo-buttons-container');
+      const samples = state.products.slice(0, 5);
+      if (samples.length === 0) {
+        container.innerHTML = `<span class="text-xs text-slate-400">Hãy thêm sản phẩm ở tab Kho hàng để quét thử.</span>`;
+        return;
+      }
+      container.innerHTML = samples.map(p => `
+        <button
+          type="button"
+          onclick="simulateQuickScan('${escapeHTML(p.id)}')"
+          title="${escapeHTML(p.name)} — ${formatPriceWithUnit(p.price, p.unit)}"
+          class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-50 hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-xs font-semibold text-slate-700 hover:text-sky-800 transition-all active:scale-95 cursor-pointer">
+          <span>${escapeHTML(p.emoji || '📦')}</span>
+          <span class="font-mono text-[11px] text-slate-400">${escapeHTML(p.id)}</span>
+          <span class="max-w-[140px] truncate">${escapeHTML(p.name)}</span>
+        </button>
+      `).join('');
+    }
+
+    /*************************************************************************
+     * 9. QUẢN LÝ GIỎ HÀNG & THANH TOÁN (POS MODE)
+     *************************************************************************/
+    function addProductToCart(product, notify = true) {
+      const existing = state.cart.find(item => item.id === product.id);
+      if (existing) {
+        existing.qty += 1;
+        existing.price = Number(product.price) || 0;
+        existing.name = product.name;
+        existing.unit = product.unit || existing.unit;
+      } else {
+        state.cart.push({
+          id: product.id,
+          name: product.name,
+          price: Number(product.price) || 0,
+          unit: product.unit || 'cái',
+          category: product.category || '',
+          emoji: product.emoji || '📦',
+          qty: 1,
+        });
+      }
+      renderCart();
+      if (notify) {
+        showToast(`Đã thêm "${product.name}" vào giỏ hàng`, 'success');
+      }
+    }
+
+    function addLastScannedToCartAndSwitch() {
+      if (!state.lastScannedResult || state.lastScannedResult.type !== 'product') return;
+      addProductToCart(state.lastScannedResult.product, true);
+      setScanMode('pos');
+    }
+
+    function updateCartQty(productId, delta) {
+      const idx = state.cart.findIndex(item => item.id === productId);
+      if (idx === -1) return;
+      state.cart[idx].qty += delta;
+      if (state.cart[idx].qty <= 0) {
+        state.cart.splice(idx, 1);
+      }
+      renderCart();
+    }
+
+    function removeFromCart(productId) {
+      state.cart = state.cart.filter(item => item.id !== productId);
+      renderCart();
+    }
+
+    function confirmClearCart() {
+      if (state.cart.length === 0) return;
+      openConfirmModal(
+        'Xóa giỏ hàng hiện tại?',
+        'Toàn bộ các món hàng trong hóa đơn tạm tính sẽ bị xóa.',
+        () => {
+          state.cart = [];
+          renderCart();
+          showToast('Đã xóa sạch giỏ hàng', 'info');
+        }
+      );
+    }
+
+    function getCartStats() {
+      let totalQty = 0;
+      let totalAmount = 0;
+      state.cart.forEach(item => {
+        totalQty += item.qty;
+        totalAmount += item.qty * item.price;
+      });
+      return { totalQty, totalAmount };
+    }
+
+    function renderCart() {
+      const { totalQty, totalAmount } = getCartStats();
+      const badge = document.getElementById('cart-count-badge');
+      const summary = document.getElementById('cart-items-summary');
+      const totalEl = document.getElementById('cart-total-amount');
+      const listEl = document.getElementById('cart-list');
+      const checkoutBtn = document.getElementById('btn-checkout');
+
+      badge.textContent = totalQty;
+      badge.classList.toggle('hidden', totalQty === 0);
+      summary.textContent = `${totalQty} sản phẩm`;
+      totalEl.textContent = formatVND(totalAmount);
+      checkoutBtn.disabled = state.cart.length === 0;
+
+      if (state.cart.length === 0) {
+        listEl.innerHTML = `
+          <div class="p-8 text-center text-sm text-slate-400">
+            Giỏ hàng đang trống. Hãy quét mã QR sản phẩm để tự động cộng vào hóa đơn!
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = state.cart.map(item => `
+        <div class="px-4 sm:px-5 py-3.5 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="text-2xl shrink-0">${escapeHTML(item.emoji)}</span>
+            <div class="min-w-0">
+              <p class="text-sm font-bold text-slate-800 truncate">${escapeHTML(item.name)}</p>
+              <p class="text-xs text-slate-500 tabular-nums">${formatPriceWithUnit(item.price, item.unit)}</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div class="inline-flex items-center rounded-xl border border-slate-200 bg-slate-50">
+              <button
+                type="button"
+                onclick="updateCartQty('${escapeHTML(item.id)}', -1)"
+                class="w-8 h-8 flex items-center justify-center text-slate-600 hover:bg-slate-200/70 rounded-l-xl font-bold cursor-pointer">−</button>
+              <span class="w-8 text-center text-sm font-extrabold text-slate-900 tabular-nums">${item.qty}</span>
+              <button
+                type="button"
+                onclick="updateCartQty('${escapeHTML(item.id)}', 1)"
+                class="w-8 h-8 flex items-center justify-center text-slate-600 hover:bg-slate-200/70 rounded-r-xl font-bold cursor-pointer">+</button>
+            </div>
+            <div class="w-20 sm:w-24 text-right text-sm font-extrabold text-teal-600 tabular-nums">
+              ${formatVND(item.price * item.qty)}
+            </div>
+            <button
+              type="button"
+              onclick="removeFromCart('${escapeHTML(item.id)}')"
+              title="Xóa món"
+              class="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openCheckoutModal() {
+      if (state.cart.length === 0) return;
+      const { totalAmount } = getCartStats();
+      document.getElementById('checkout-time').textContent = 'Thời gian: ' + new Date().toLocaleString('vi-VN');
+      document.getElementById('checkout-total-price').textContent = formatVND(totalAmount);
+      document.getElementById('checkout-items-list').innerHTML = state.cart.map(item => `
+        <div class="py-2.5 flex items-center justify-between gap-2">
+          <div class="min-w-0">
+            <p class="font-semibold text-slate-800 truncate">${escapeHTML(item.emoji)} ${escapeHTML(item.name)}</p>
+            <p class="text-xs text-slate-400">${item.qty} ${escapeHTML(item.unit)} × ${formatPriceWithUnit(item.price, item.unit)}</p>
+          </div>
+          <span class="font-bold text-slate-900 tabular-nums shrink-0">${formatVND(item.qty * item.price)}</span>
+        </div>
+      `).join('');
+
+      document.getElementById('checkout-modal').classList.remove('hidden');
+    }
+
+    function closeCheckoutModal() {
+      document.getElementById('checkout-modal').classList.add('hidden');
+    }
+
+    function completeCheckout() {
+      playScannerBeep('checkout');
+      state.cart = [];
+      renderCart();
+      closeCheckoutModal();
+      showToast('Thanh toán thành công! Đã tạo đơn hàng mới.', 'success');
+    }
+
+    /*************************************************************************
+     * 10. KHO HÀNG (CRUD), TẠO QR & TAB IN TEM A4 CHUYÊN BIỆT
+     *************************************************************************/
+    function populateCategoryFilterOptions() {
+      const select = document.getElementById('category-filter-select');
+      if (!select) return;
+      const categories = Array.from(new Set(state.products.map(p => p.category || 'Khác')));
+      if (state.categoryFilter !== 'ALL' && !categories.includes(state.categoryFilter)) {
+        state.categoryFilter = 'ALL';
+      }
+      select.innerHTML = `<option value="ALL">Tất cả danh mục (${state.products.length})</option>` +
+        categories.map(cat => `<option value="${escapeHTML(cat)}">${escapeHTML(cat)}</option>`).join('');
+      select.value = state.categoryFilter;
+    }
+
+    function handleCategoryFilterChange() {
+      state.categoryFilter = document.getElementById('category-filter-select').value;
+      renderProductGrid();
+    }
+
+    function renderProductGrid() {
+      const grid = document.getElementById('product-grid');
+      const query = (document.getElementById('product-search-input').value || '').trim().toLowerCase();
+
+      const filtered = state.products.filter(p => {
+        const matchesCat = state.categoryFilter === 'ALL' || (p.category || 'Khác') === state.categoryFilter;
+        const matchesQuery = !query ||
+          p.name.toLowerCase().includes(query) ||
+          p.id.toLowerCase().includes(query) ||
+          (p.category || '').toLowerCase().includes(query);
+        return matchesCat && matchesQuery;
+      });
+
+      const countBadge = document.getElementById('inventory-count-badge');
+      if (countBadge) {
+        countBadge.textContent = `${filtered.length} sản phẩm`;
+      }
+
+      if (filtered.length === 0) {
+        grid.innerHTML = `
+          <div class="sm:col-span-2 lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-10 text-center">
+            <p class="text-base font-bold text-slate-700">Không tìm thấy sản phẩm phù hợp</p>
+            <p class="text-sm text-slate-400 mt-1">Thử từ khóa khác hoặc nhấn "Thêm sản phẩm mới" để tạo hàng hóa.</p>
+          </div>
+        `;
+        return;
+      }
+
+      grid.innerHTML = filtered.map(p => `
+        <article class="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md transition-all flex flex-col overflow-hidden">
+          <!-- Đầu thẻ: Mã SP + Danh mục + Biểu tượng -->
+          <div class="px-4 pt-4 pb-2.5 flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">${escapeHTML(p.id)}</span>
+                <span class="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-sky-50 text-sky-700">${escapeHTML(p.category || 'Khác')}</span>
+              </div>
+              <h3 class="text-sm sm:text-base font-extrabold text-slate-900 mt-1.5 leading-snug line-clamp-2">
+                ${escapeHTML(p.name)}
+              </h3>
+            </div>
+            <span class="w-10 h-10 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-xl shrink-0">
+              ${escapeHTML(p.emoji || '📦')}
+            </span>
+          </div>
+
+          <!-- Giá tiền kèm đơn vị nổi bật -->
+          <div class="px-4 pb-3">
+            <div class="text-lg sm:text-xl font-extrabold text-teal-600 tabular-nums">
+              ${formatPriceWithUnit(p.price, p.unit)}
+            </div>
+          </div>
+
+          <!-- Khu vực mã QR thật sắc nét (chạm để phóng to) -->
+          <div class="px-4 pb-4 flex-1 flex items-center justify-center">
+            <button
+              type="button"
+              onclick="openQrPreviewModal('${escapeHTML(p.id)}')"
+              title="Nhấn để phóng to mã QR"
+              class="group relative p-3 rounded-2xl bg-slate-50 hover:bg-sky-50/70 border border-slate-200/80 hover:border-sky-300 transition-all cursor-pointer">
+              <canvas id="qr-canvas-${escapeHTML(p.id)}" class="block rounded-lg bg-white"></canvas>
+              <span class="block mt-1.5 text-[11px] font-medium text-slate-400 group-hover:text-sky-600 text-center">
+                Nhấn để phóng to
+              </span>
+            </button>
+          </div>
+
+          <!-- Hàng nút hành động: Tải PNG, Sửa, Xóa -->
+          <div class="px-3.5 py-3 bg-slate-50/80 border-t border-slate-100 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onclick="downloadProductLabelPNG('${escapeHTML(p.id)}')"
+              class="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 text-slate-700 hover:text-sky-700 text-xs font-bold transition-all cursor-pointer">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span>Tải tem PNG</span>
+            </button>
+            <button
+              type="button"
+              onclick="openProductModal('${escapeHTML(p.id)}')"
+              class="py-2 px-3 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 text-xs font-semibold transition-all cursor-pointer">
+              Sửa
+            </button>
+            <button
+              type="button"
+              onclick="confirmDeleteProduct('${escapeHTML(p.id)}')"
+              class="py-2 px-3 rounded-xl bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-500 hover:text-rose-600 text-xs font-semibold transition-all cursor-pointer">
+              Xóa
+            </button>
+          </div>
+        </article>
+      `).join('');
+
+      // Sau khi tạo khung thẻ, vẽ mã QR thật lên từng canvas
+      filtered.forEach(p => {
+        const canvas = document.getElementById(`qr-canvas-${p.id}`);
+        if (canvas) {
+          drawQrToCanvas(canvas, buildProductQrPayload(p), 144, 2);
+        }
+      });
+    }
+
+    // Lấy danh sách tem đã mở rộng theo số lượng người dùng chọn ở Tab 3
+    function getExpandedPrintItems() {
+      const items = [];
+      state.products.forEach(p => {
+        if (!state.selectedIds.has(p.id)) return;
+        const qty = Math.max(1, Math.min(50, Number(state.printQuantities[p.id]) || 1));
+        for (let i = 0; i < qty; i++) {
+          items.push(p);
+        }
+      });
+      return items;
+    }
+
+    function renderPrintTab() {
+      syncPrintQuantities();
+      // Làm sạch ID không còn tồn tại
+      const validIds = new Set(state.products.map(p => p.id));
+      for (const id of Array.from(state.selectedIds)) {
+        if (!validIds.has(id)) state.selectedIds.delete(id);
+      }
+
+      const selectorEl = document.getElementById('print-product-selector');
+      if (state.products.length === 0) {
+        selectorEl.innerHTML = `<div class="p-6 text-center text-xs text-slate-400">Kho hàng đang trống. Hãy thêm sản phẩm ở tab Kho hàng &amp; Tạo QR.</div>`;
+      } else {
+        selectorEl.innerHTML = state.products.map(p => {
+          const isChecked = state.selectedIds.has(p.id);
+          const qty = state.printQuantities[p.id] || 1;
+          return `
+            <div class="px-4 sm:px-5 py-3 flex items-center justify-between gap-3 ${isChecked ? 'bg-sky-50/40' : 'bg-white'} transition-colors">
+              <label class="flex items-center gap-3 min-w-0 flex-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  ${isChecked ? 'checked' : ''}
+                  onchange="togglePrintSelection('${escapeHTML(p.id)}')"
+                  class="w-4 h-4 rounded accent-teal-600 cursor-pointer shrink-0" />
+                <span class="text-xl shrink-0">${escapeHTML(p.emoji || '📦')}</span>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[11px] font-mono font-bold text-slate-500">${escapeHTML(p.id)}</span>
+                    <span class="text-xs font-bold text-teal-600 tabular-nums">${formatPriceWithUnit(p.price, p.unit)}</span>
+                  </div>
+                  <p class="text-sm font-bold text-slate-800 truncate">${escapeHTML(p.name)}</p>
+                </div>
+              </label>
+
+              <!-- Bộ chỉnh số lượng tem cho từng sản phẩm -->
+              <div class="inline-flex items-center rounded-xl border border-slate-200 bg-white shrink-0 ${isChecked ? '' : 'opacity-50'}">
+                <button
+                  type="button"
+                  onclick="updatePrintQty('${escapeHTML(p.id)}', -1)"
+                  class="w-7 h-7 flex items-center justify-center text-slate-600 hover:bg-slate-100 rounded-l-xl font-bold cursor-pointer">−</button>
+                <span class="w-8 text-center text-xs font-extrabold text-slate-900 tabular-nums">${qty}</span>
+                <button
+                  type="button"
+                  onclick="updatePrintQty('${escapeHTML(p.id)}', 1)"
+                  class="w-7 h-7 flex items-center justify-center text-slate-600 hover:bg-slate-100 rounded-r-xl font-bold cursor-pointer">+</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      updatePrintSizeUI();
+      updateLabelPriceUI();
+      renderPrintLivePreview();
+    }
+
+    function togglePrintSelection(productId) {
+      if (state.selectedIds.has(productId)) {
+        state.selectedIds.delete(productId);
+      } else {
+        state.selectedIds.add(productId);
+      }
+      renderPrintTab();
+    }
+
+    function updatePrintQty(productId, delta) {
+      const current = Number(state.printQuantities[productId]) || 1;
+      const next = Math.max(1, Math.min(50, current + delta));
+      state.printQuantities[productId] = next;
+      // Nếu người dùng bấm tăng số lượng trên sản phẩm đang bỏ chọn, tự tích chọn luôn
+      if (delta > 0 && !state.selectedIds.has(productId)) {
+        state.selectedIds.add(productId);
+      }
+      renderPrintTab();
+    }
+
+    function selectAllPrintProducts(selectAll) {
+      if (selectAll) {
+        state.products.forEach(p => state.selectedIds.add(p.id));
+      } else {
+        state.selectedIds.clear();
+      }
+      renderPrintTab();
+    }
+
+    function resetAllPrintQuantities() {
+      state.products.forEach(p => {
+        state.printQuantities[p.id] = 1;
+      });
+      renderPrintTab();
+      showToast('Đã đặt số lượng tất cả tem về 1', 'info');
+    }
+
+    function renderPrintLivePreview() {
+      const items = getExpandedPrintItems();
+      const countBadge = document.getElementById('selected-print-count');
+      const previewEl = document.getElementById('print-live-preview');
+      const metaEl = document.getElementById('print-preview-meta');
+      const printBtn = document.getElementById('btn-print-now');
+
+      const sizeText = state.printSize === 'sm' ? 'Nhỏ (4 tem/hàng)' : state.printSize === 'lg' ? 'Lớn (2 tem/hàng)' : 'Vừa (3 tem/hàng)';
+      if (countBadge) countBadge.textContent = `${items.length} tem`;
+      if (metaEl) metaEl.textContent = `Khổ A4 dọc • ${sizeText} • Tổng ${items.length} tem`;
+      if (printBtn) printBtn.disabled = items.length === 0;
+
+      if (items.length === 0) {
+        previewEl.innerHTML = `
+          <div class="h-full min-h-[320px] flex flex-col items-center justify-center text-center p-6">
+            <div class="w-14 h-14 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-3">
+              <svg class="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+              </svg>
+            </div>
+            <p class="text-sm font-bold text-slate-700">Chưa có tem nào được chọn</p>
+            <p class="text-xs text-slate-400 mt-1">Hãy tích chọn ít nhất 1 sản phẩm ở cột bên trái để xem trước bản in A4.</p>
+          </div>
+        `;
+        return;
+      }
+
+      // Tạo cache ảnh QR theo từng sản phẩm để hiển thị nhanh dù in nhiều bản sao
+      const qrCache = {};
+      state.products.forEach(p => {
+        if (state.selectedIds.has(p.id)) {
+          qrCache[p.id] = generateHighResQrDataUrl(p, 280);
+        }
+      });
+
+      const cardsHtml = items.map(p => {
+        const priceHtml = state.showPriceOnLabel
+          ? `<div class="text-xs sm:text-sm font-extrabold text-teal-700 tabular-nums mt-1">${formatPriceWithUnit(p.price, p.unit)}</div>`
+          : `<div class="text-[11px] font-semibold text-sky-600 mt-1">Quét QR để xem giá</div>`;
+
+        return `
+          <div class="a4-preview-card">
+            <div class="w-full flex items-center justify-between text-[10px] font-mono text-slate-400">
+              <span>ScanPrice</span>
+              <span>${escapeHTML(p.id)}</span>
+            </div>
+            <img src="${qrCache[p.id]}" alt="QR ${escapeHTML(p.id)}" />
+            <div class="text-xs font-bold text-slate-900 leading-tight mt-1 line-clamp-2">${escapeHTML(p.name)}</div>
+            ${priceHtml}
+          </div>
+        `;
+      }).join('');
+
+      previewEl.innerHTML = `
+        <div class="flex items-center justify-between border-b border-slate-200 pb-2 mb-3 text-[11px] text-slate-400">
+          <span class="font-bold text-slate-600">ScanPrice — Bảng Tem QR (${items.length} tem)</span>
+          <span>${new Date().toLocaleDateString('vi-VN')}</span>
+        </div>
+        <div class="a4-preview-grid size-${state.printSize}">
+          ${cardsHtml}
+        </div>
+      `;
+    }
+
+    function handleLabelPriceToggle() {
+      state.showPriceOnLabel = document.getElementById('toggle-label-price').checked;
+      saveSettingsToStorage();
+      updateLabelPriceUI();
+      if (state.activeTab === 'print') {
+        renderPrintLivePreview();
+      }
+    }
+
+    function updateLabelPriceUI() {
+      const toggleEl = document.getElementById('toggle-label-price');
+      if (toggleEl) toggleEl.checked = state.showPriceOnLabel;
+      const hint = document.getElementById('label-price-hint');
+      if (hint) {
+        hint.innerHTML = state.showPriceOnLabel
+          ? 'Tem in &amp; ảnh PNG sẽ <strong>hiển thị giá tiền kèm đơn vị</strong>.'
+          : 'Tem in &amp; ảnh PNG sẽ <strong>ẩn giá tiền</strong> (chỉ hiện tên + QR để quét tra giá).';
+      }
+    }
+
+    function setPrintSize(size) {
+      state.printSize = size;
+      saveSettingsToStorage();
+      updatePrintSizeUI();
+      if (state.activeTab === 'print') {
+        renderPrintLivePreview();
+      }
+    }
+
+    function updatePrintSizeUI() {
+      document.querySelectorAll('.print-size-btn').forEach(btn => {
+        const active = btn.dataset.size === state.printSize;
+        btn.className = active
+          ? 'print-size-btn py-2 px-2 rounded-lg text-xs font-bold bg-white text-sky-700 shadow-2xs transition-all cursor-pointer'
+          : 'print-size-btn py-2 px-2 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-800 transition-all cursor-pointer';
+      });
+    }
+
+    // Chuẩn bị lưới tem sắc nét độ phân giải cao và gọi hộp thoại In A4 của trình duyệt
+    function printSelectedLabels() {
+      const toPrint = getExpandedPrintItems();
+      if (toPrint.length === 0) {
+        showToast('Vui lòng chọn ít nhất 1 sản phẩm để in tem!', 'error');
+        return;
+      }
+
+      const printArea = document.getElementById('print-area');
+      const sizeClass = `size-${state.printSize}`;
+      const sizeText = state.printSize === 'sm' ? 'Nhỏ (4 tem/hàng)' : state.printSize === 'lg' ? 'Lớn (2 tem/hàng)' : 'Vừa (3 tem/hàng)';
+
+      // Tạo QR độ phân giải cao 1 lần cho mỗi sản phẩm duy nhất
+      const qrCache = {};
+      state.products.forEach(p => {
+        if (state.selectedIds.has(p.id)) {
+          qrCache[p.id] = generateHighResQrDataUrl(p, 360);
+        }
+      });
+
+      const cardsHtml = toPrint.map(p => {
+        const priceHtml = state.showPriceOnLabel
+          ? `<div class="print-label-price">${formatPriceWithUnit(p.price, p.unit)}</div>`
+          : `<div class="print-label-meta" style="color:#0284c7;font-weight:600;margin-top:4px;">Quét QR để xem giá</div>`;
+
+        return `
+          <div class="print-label-card">
+            <div class="print-label-meta" style="width:100%;display:flex;justify-content:space-between;font-family:monospace;">
+              <span>ScanPrice</span>
+              <span>${escapeHTML(p.id)}</span>
+            </div>
+            <img src="${qrCache[p.id]}" alt="QR ${escapeHTML(p.id)}" />
+            <div class="print-label-name">${escapeHTML(p.name)}</div>
+            ${priceHtml}
+          </div>
+        `;
+      }).join('');
+
+      printArea.innerHTML = `
+        <div class="print-header">
+          <strong>ScanPrice — Bảng Tem QR Sản Phẩm (${toPrint.length} tem)</strong>
+          <span>Cỡ tem: ${sizeText} • Ngày in: ${new Date().toLocaleDateString('vi-VN')}</span>
+        </div>
+        <div class="print-grid ${sizeClass}">
+          ${cardsHtml}
+        </div>
+      `;
+
+      // Đợi ảnh DataURL vẽ xong hoàn toàn trước khi mở hộp thoại in
+      setTimeout(() => {
+        window.print();
+      }, 120);
+    }
+
+    /*************************************************************************
+     * 11. MODAL THÊM / SỬA SẢN PHẨM, PHÓNG TO QR & XÁC NHẬN
+     *************************************************************************/
+    function initEmojiPicker() {
+      const grid = document.getElementById('emoji-picker-grid');
+      grid.innerHTML = EMOJI_CHOICES.map(emoji => `
+        <button
+          type="button"
+          onclick="selectFormEmoji('${emoji}')"
+          class="w-8 h-8 rounded-lg hover:bg-sky-100 border border-slate-100 flex items-center justify-center text-lg transition-transform active:scale-90 cursor-pointer">
+          ${emoji}
+        </button>
+      `).join('');
+    }
+
+    function selectFormEmoji(emoji) {
+      document.getElementById('form-emoji').value = emoji;
+      document.getElementById('selected-emoji-preview').textContent = emoji;
+    }
+
+    function generateNextProductCode() {
+      let maxNum = 0;
+      state.products.forEach(p => {
+        const m = /^SP(\d+)$/i.exec(p.id);
+        if (m) {
+          const n = parseInt(m[1], 10);
+          if (n > maxNum) maxNum = n;
+        }
+      });
+      return 'SP' + String(maxNum + 1).padStart(2, '0');
+    }
+
+    function fillAutoProductCode() {
+      document.getElementById('form-code').value = generateNextProductCode();
+    }
+
+    function openProductModal(editingId = null) {
+      const titleEl = document.getElementById('product-modal-title');
+      const hiddenId = document.getElementById('form-editing-id');
+      const nameInput = document.getElementById('form-name');
+      const priceInput = document.getElementById('form-price');
+      const unitInput = document.getElementById('form-unit');
+      const categoryInput = document.getElementById('form-category');
+      const codeInput = document.getElementById('form-code');
+
+      if (editingId) {
+        const p = state.products.find(item => item.id === editingId);
+        if (!p) return;
+        titleEl.textContent = 'Chỉnh sửa sản phẩm';
+        hiddenId.value = p.id;
+        nameInput.value = p.name;
+        priceInput.value = p.price;
+        unitInput.value = p.unit;
+        categoryInput.value = p.category || 'Khác';
+        codeInput.value = p.id;
+        selectFormEmoji(p.emoji || '📦');
+      } else {
+        titleEl.textContent = 'Thêm sản phẩm mới';
+        hiddenId.value = '';
+        nameInput.value = '';
+        priceInput.value = '';
+        unitInput.value = 'hộp';
+        categoryInput.value = 'Đồ uống';
+        codeInput.value = generateNextProductCode();
+        selectFormEmoji('📦');
+      }
+
+      document.getElementById('product-modal').classList.remove('hidden');
+      setTimeout(() => nameInput.focus(), 50);
+    }
+
+    function closeProductModal() {
+      document.getElementById('product-modal').classList.add('hidden');
+    }
+
+    function saveProductForm(event) {
+      event.preventDefault();
+
+      const editingId = document.getElementById('form-editing-id').value.trim();
+      const name = document.getElementById('form-name').value.trim();
+      const price = Math.max(0, Math.round(Number(document.getElementById('form-price').value) || 0));
+      const unit = document.getElementById('form-unit').value.trim() || 'cái';
+      const category = document.getElementById('form-category').value.trim() || 'Khác';
+      const emoji = document.getElementById('form-emoji').value || '📦';
+      let code = document.getElementById('form-code').value.trim().toUpperCase().replace(/\s+/g, '');
+
+      if (!name) {
+        showToast('Vui lòng nhập tên hàng hóa.', 'error');
+        return;
+      }
+
+      if (!code) {
+        code = generateNextProductCode();
+      }
+
+      // Kiểm tra trùng mã sản phẩm
+      const duplicate = state.products.find(
+        p => p.id.toUpperCase() === code && p.id !== editingId
+      );
+      if (duplicate) {
+        showToast(`Mã sản phẩm "${code}" đã tồn tại. Hãy chọn mã khác!`, 'error');
+        return;
+      }
+
+      if (editingId) {
+        const idx = state.products.findIndex(p => p.id === editingId);
+        if (idx !== -1) {
+          const wasSelected = state.selectedIds.has(editingId);
+          const prevQty = state.printQuantities[editingId] || 1;
+          state.products[idx] = { id: code, name, price, unit, category, emoji };
+          if (wasSelected) {
+            state.selectedIds.delete(editingId);
+            state.selectedIds.add(code);
+          }
+          delete state.printQuantities[editingId];
+          state.printQuantities[code] = prevQty;
+        }
+        showToast(`Đã cập nhật "${name}"`, 'success');
+      } else {
+        state.products.unshift({ id: code, name, price, unit, category, emoji });
+        state.selectedIds.add(code);
+        state.printQuantities[code] = 1;
+        showToast(`Đã thêm mới "${name}" (${code})`, 'success');
+      }
+
+      saveProductsToStorage();
+      closeProductModal();
+      populateCategoryFilterOptions();
+      renderProductGrid();
+      renderDemoButtons();
+      if (state.activeTab === 'print') renderPrintTab();
+    }
+
+    function confirmDeleteProduct(productId) {
+      const p = state.products.find(item => item.id === productId);
+      if (!p) return;
+      openConfirmModal(
+        'Xóa sản phẩm này?',
+        `Bạn có chắc muốn xóa "${p.name}" (${p.id}) khỏi danh sách không?`,
+        () => {
+          state.products = state.products.filter(item => item.id !== productId);
+          state.selectedIds.delete(productId);
+          delete state.printQuantities[productId];
+          saveProductsToStorage();
+          populateCategoryFilterOptions();
+          renderProductGrid();
+          renderDemoButtons();
+          if (state.activeTab === 'print') renderPrintTab();
+          showToast(`Đã xóa "${p.name}"`, 'info');
+        }
+      );
+    }
+
+    function confirmResetSampleData() {
+      openConfirmModal(
+        'Khôi phục 5 sản phẩm mặc định?',
+        'Danh sách sản phẩm hiện tại sẽ được thay thế bằng 5 sản phẩm mặc định mới (SP01–SP05).',
+        () => {
+          state.products = structuredClone(DEFAULT_PRODUCTS);
+          state.selectedIds = new Set(state.products.map(p => p.id));
+          state.printQuantities = {};
+          syncPrintQuantities();
+          state.categoryFilter = 'ALL';
+          saveProductsToStorage();
+          populateCategoryFilterOptions();
+          renderProductGrid();
+          renderDemoButtons();
+          if (state.activeTab === 'print') renderPrintTab();
+          showToast('Đã khôi phục 5 sản phẩm mặc định (SP01–SP05)', 'success');
+        }
+      );
+    }
+
+    function openQrPreviewModal(productId) {
+      const p = state.products.find(item => item.id === productId);
+      if (!p) return;
+
+      document.getElementById('preview-code-badge').textContent = `MÃ: ${p.id} • ${p.category || 'Hàng hóa'}`;
+      document.getElementById('preview-product-name').textContent = `${p.emoji || ''} ${p.name}`;
+      document.getElementById('preview-product-price').textContent = formatPriceWithUnit(p.price, p.unit);
+
+      const canvas = document.getElementById('preview-qr-canvas');
+      drawQrToCanvas(canvas, buildProductQrPayload(p), 230, 3);
+
+      const dlBtn = document.getElementById('preview-download-btn');
+      dlBtn.onclick = () => downloadProductLabelPNG(p.id);
+
+      document.getElementById('qr-preview-modal').classList.remove('hidden');
+    }
+
+    function closeQrPreviewModal() {
+      document.getElementById('qr-preview-modal').classList.add('hidden');
+    }
+
+    function openConfirmModal(title, message, onConfirm) {
+      document.getElementById('confirm-modal-title').textContent = title;
+      document.getElementById('confirm-modal-message').textContent = message;
+      state.confirmCallback = onConfirm;
+      document.getElementById('confirm-modal').classList.remove('hidden');
+    }
+
+    function closeConfirmModal() {
+      document.getElementById('confirm-modal').classList.add('hidden');
+      state.confirmCallback = null;
+    }
+
+    document.getElementById('confirm-modal-ok').addEventListener('click', () => {
+      const cb = state.confirmCallback;
+      closeConfirmModal();
+      if (typeof cb === 'function') cb();
+    });
+
+    /*************************************************************************
+     * 12. HỆ THỐNG THÔNG BÁO TOAST
+     *************************************************************************/
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+
+      const styles = {
+        success: 'bg-emerald-600 text-white border-emerald-700',
+        error: 'bg-rose-600 text-white border-rose-700',
+        info: 'bg-slate-900 text-white border-slate-800',
+      };
+
+      toast.className = `pointer-events-auto px-4 py-3 rounded-xl border shadow-lg text-sm font-semibold flex items-center justify-between gap-3 animate-price-pop ${styles[type] || styles.info}`;
+      toast.innerHTML = `<span>${escapeHTML(message)}</span>`;
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        toast.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(8px)';
+        setTimeout(() => toast.remove(), 260);
+      }, 2800);
+    }
+
+    /*************************************************************************
+     * 13. KHỞI TẠO ỨNG DỤNG KHI TẢI TRANG
+     *************************************************************************/
+    function initApp() {
+      loadStateFromStorage();
+      initEmojiPicker();
+      populateCategoryFilterOptions();
+      updateSoundButtonUI();
+      updateLabelPriceUI();
+      updatePrintSizeUI();
+      renderDemoButtons();
+      renderPriceDisplay();
+      renderRecentScans();
+      renderCart();
+      setScanMode('check');
+      switchTab('scanner');
+    }
+
+    // Dừng camera an toàn nếu người dùng rời trang
+    window.addEventListener('beforeunload', () => {
+      if (state.cameraActive) stopCamera();
+    });
+
+    window.addEventListener('DOMContentLoaded', initApp);
+  </script>
+</body>
+</html>
